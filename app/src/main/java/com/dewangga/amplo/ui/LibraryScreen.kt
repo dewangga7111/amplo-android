@@ -1,5 +1,10 @@
 package com.dewangga.amplo.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -25,9 +30,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,29 +56,48 @@ fun LibraryScreen(model: AppViewModel) {
     val songs by model.songs.collectAsStateWithLifecycle()
     val sort by model.sort.collectAsStateWithLifecycle()
     val player by model.player.playerState.collectAsStateWithLifecycle()
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(Amplo.Background),
-    ) {
-        Box(Modifier.weight(1f)) {
-            val list = songs
-            when {
-                list == null -> Message("Reading your library…", null)
-                list.isEmpty() -> Message("No songs yet", "Copy music to this device and it shows here.")
-                else -> SongList(
-                    songs = list,
-                    sort = sort ?: Sort.RecentlyAdded,
-                    currentId = player.trackId,
-                    onPlay = { index, shuffle -> model.player.play(list, index, shuffle) },
-                    onSort = model::setSort,
+    var nowPlaying by rememberSaveable { mutableStateOf(false) }
+    // Nothing to show once the queue is empty.
+    LaunchedEffect(player.trackId) {
+        if (player.trackId == null) nowPlaying = false
+    }
+    Box(Modifier.fillMaxSize()) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .background(Amplo.Background),
+        ) {
+            Box(Modifier.weight(1f)) {
+                val list = songs
+                when {
+                    list == null -> Message("Reading your library…", null)
+                    list.isEmpty() -> Message("No songs yet", "Copy music to this device and it shows here.")
+                    else -> SongList(
+                        songs = list,
+                        sort = sort ?: Sort.RecentlyAdded,
+                        currentId = player.trackId,
+                        onPlay = { index, shuffle -> model.player.play(list, index, shuffle, source = "All Songs") },
+                        onSort = model::setSort,
+                    )
+                }
+            }
+            if (player.trackId != null) {
+                MiniPlayer(
+                    player,
+                    positionMs = { model.player.positionMs },
+                    connection = model.player,
+                    onOpen = { nowPlaying = true },
                 )
+            } else {
+                Spacer(Modifier.navigationBarsPadding())
             }
         }
-        if (player.trackId != null) {
-            MiniPlayer(player, positionMs = { model.player.positionMs }, connection = model.player)
-        } else {
-            Spacer(Modifier.navigationBarsPadding())
+        AnimatedVisibility(
+            visible = nowPlaying,
+            enter = slideInVertically { it } + fadeIn(),
+            exit = slideOutVertically { it } + fadeOut(),
+        ) {
+            NowPlaying(model, player, onClose = { nowPlaying = false })
         }
     }
 }
@@ -99,7 +125,7 @@ private fun SongList(
     songs: List<Track>,
     sort: Sort,
     currentId: Long?,
-    onPlay: (index: Int, shuffle: Boolean) -> Unit,
+    onPlay: (index: Int, shuffle: Boolean?) -> Unit,
     onSort: (Sort) -> Unit,
 ) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 8.dp)) {
@@ -107,13 +133,13 @@ private fun SongList(
             Header(songs, sort, onPlay, onSort)
         }
         itemsIndexed(songs, key = { _, track -> track.id }) { index, track ->
-            SongRow(track, current = track.id == currentId) { onPlay(index, false) }
+            SongRow(track, current = track.id == currentId) { onPlay(index, null) }
         }
     }
 }
 
 @Composable
-private fun Header(songs: List<Track>, sort: Sort, onPlay: (Int, Boolean) -> Unit, onSort: (Sort) -> Unit) {
+private fun Header(songs: List<Track>, sort: Sort, onPlay: (Int, Boolean?) -> Unit, onSort: (Sort) -> Unit) {
     Column(
         Modifier
             .statusBarsPadding()

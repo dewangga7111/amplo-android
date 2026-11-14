@@ -23,11 +23,13 @@ object MediaStoreScanner {
             add(Media.TRACK)
             add(Media.DURATION)
             add(Media.DATE_ADDED)
+            add(Media.SIZE)
             if (newer) {
                 add(Media.ALBUM_ARTIST)
                 add(Media.GENRE)
                 add(Media.CD_TRACK_NUMBER)
                 add(Media.DISC_NUMBER)
+                add(Media.BITRATE)
             }
         }
         val tracks = mutableListOf<Track>()
@@ -52,6 +54,8 @@ object MediaStoreScanner {
             val genre = if (newer) column(Media.GENRE) else -1
             val cdTrack = if (newer) column(Media.CD_TRACK_NUMBER) else -1
             val disc = if (newer) column(Media.DISC_NUMBER) else -1
+            val size = column(Media.SIZE)
+            val bitrate = if (newer) column(Media.BITRATE) else -1
             while (cursor.moveToNext()) {
                 val fileName = cursor.getString(file).orEmpty().substringBeforeLast('.')
                 var songTitle = text(title)
@@ -80,10 +84,22 @@ object MediaStoreScanner {
                     number = trackNumber,
                     durationMs = cursor.getLong(duration),
                     added = cursor.getLong(added),
+                    bitrate = averageBitrate(
+                        if (bitrate >= 0) cursor.getLong(bitrate) else 0,
+                        cursor.getLong(size),
+                        cursor.getLong(duration),
+                    ),
                 )
             }
         }
         return tracks
+    }
+
+    /** The bitrate from the tags in kbit/s. Without it, the file size and length give an average. */
+    private fun averageBitrate(tagged: Long, bytes: Long, durationMs: Long): Int = when {
+        tagged > 0 -> (tagged / 1000).toInt()
+        bytes > 0 && durationMs > 0 -> (bytes * 8 / durationMs).toInt()
+        else -> 0
     }
 
     /** MediaStore fills missing names with "<unknown>". */

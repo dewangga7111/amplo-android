@@ -1,6 +1,7 @@
 package com.dewangga.amplo.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -28,9 +29,9 @@ import com.dewangga.amplo.playback.PlayerState
 import com.dewangga.amplo.ui.theme.Amplo
 import kotlinx.coroutines.delay
 
-/** The current song at the bottom of the screen, with its progress, Play and Next. */
+/** The current song at the bottom of the screen, with its progress, Play and Next. A tap opens Now Playing. */
 @Composable
-fun MiniPlayer(state: PlayerState, positionMs: () -> Long, connection: PlayerConnection) {
+fun MiniPlayer(state: PlayerState, positionMs: () -> Long, connection: PlayerConnection, onOpen: () -> Unit) {
     var progress by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(state.trackId, state.playing, state.durationMs) {
         while (true) {
@@ -43,6 +44,7 @@ fun MiniPlayer(state: PlayerState, positionMs: () -> Long, connection: PlayerCon
         Modifier
             .fillMaxWidth()
             .background(Amplo.Mini)
+            .clickable(onClickLabel = "Open Now Playing", onClick = onOpen)
             .navigationBarsPadding(),
     ) {
         Box(

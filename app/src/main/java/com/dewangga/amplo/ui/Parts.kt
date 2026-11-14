@@ -23,6 +23,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -63,7 +64,8 @@ fun Cover(trackId: Long?, size: Dp, modifier: Modifier = Modifier, corner: Dp = 
         if (picture != null) {
             Image(picture, null, Modifier.size(size), contentScale = ContentScale.Crop)
         } else {
-            Icon(painterResource(R.drawable.ic_note), null, Modifier.size(size * 0.45f), tint = Amplo.Muted)
+            // A big cover gets a smaller note, so it does not look like a picture.
+            Icon(painterResource(R.drawable.ic_note), null, Modifier.size(minOf(size * 0.45f, 64.dp)), tint = Amplo.Muted)
         }
     }
 }
@@ -97,6 +99,7 @@ fun RoundIconButton(
     size: Dp = 40.dp,
     iconSize: Dp = 20.dp,
     filled: Boolean = false,
+    tint: Color = Amplo.Text,
     onClick: () -> Unit,
 ) {
     Box(
@@ -107,7 +110,7 @@ fun RoundIconButton(
             .clickable(interactionSource = null, indication = ripple(), onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(painterResource(icon), description, Modifier.size(iconSize), tint = if (filled) Amplo.OnAccent else Amplo.Text)
+        Icon(painterResource(icon), description, Modifier.size(iconSize), tint = if (filled) Amplo.OnAccent else tint)
     }
 }
 

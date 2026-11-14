@@ -16,6 +16,8 @@ data class Track(
     val durationMs: Long,
     /** When the file was added to the device, in seconds since 1970. */
     val added: Long,
+    /** The average bitrate in kbit/s, or 0 when unknown. */
+    val bitrate: Int = 0,
 )
 
 /** The order of every song list except albums and the queue. */

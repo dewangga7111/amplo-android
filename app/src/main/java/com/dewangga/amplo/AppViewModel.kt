@@ -73,6 +73,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** The song with this MediaStore id, if the library has it. */
+    fun track(id: Long): Track? = tracks.value?.firstOrNull { it.id == id }
+
     fun setSort(sort: Sort) {
         viewModelScope.launch { getApplication<Application>().settings.edit { it[SORT] = sort.key } }
     }
