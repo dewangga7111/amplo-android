@@ -2,6 +2,7 @@ package com.dewangga.amplo.playback
 
 import android.content.ComponentName
 import android.content.Context
+import android.os.Bundle
 import androidx.core.content.ContextCompat
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -10,6 +11,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import com.dewangga.amplo.library.SongList
 import com.dewangga.amplo.library.Track
 import com.dewangga.amplo.library.songUri
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -30,10 +32,16 @@ data class PlayerState(
     val repeatOne: Boolean = false,
     /** The list the queue came from, such as "All Songs". */
     val source: String = "",
+    /** What [source] is, such as "PLAYLIST" or "ALBUM". */
+    val sourceKind: String = "",
+    /** The key of the list the queue came from, to open it again. Empty when not known. */
+    val sourceKey: String = "",
 )
 
 /** A song of the queue. [index] is its place in the queue as it was given, which shuffle does not change. */
 data class QueueEntry(val index: Int, val trackId: Long, val title: String, val artist: String)
+
+private const val SOURCE_KEY = "amplo.source"
 
 /** Controls [PlaybackService] from the screens. Calls made before it connects run once it does. */
 class PlayerConnection(context: Context) {
@@ -83,17 +91,22 @@ class PlayerConnection(context: Context) {
 
     /**
      * Plays [tracks] from the one at [index]. True [shuffle] plays them in random order from a
-     * random song, false in order, and null keeps the shuffle as it is. [source] names the list
-     * for the Now Playing screen.
+     * random song, false in order, and null keeps the shuffle as it is. Now Playing shows the
+     * name of [list] and opens it.
      */
-    fun play(tracks: List<Track>, index: Int, shuffle: Boolean?, source: String) {
+    fun play(list: SongList, index: Int, shuffle: Boolean?) {
+        val tracks = list.songs
         if (tracks.isEmpty()) return
         val items = tracks.map(::mediaItem)
         val start = if (shuffle == true) tracks.indices.random() else index
         withController {
             if (shuffle != null) it.shuffleModeEnabled = shuffle
             if (it.repeatMode == Player.REPEAT_MODE_OFF) it.repeatMode = Player.REPEAT_MODE_ALL
-            it.playlistMetadata = MediaMetadata.Builder().setTitle(source).build()
+            it.playlistMetadata = MediaMetadata.Builder()
+                .setTitle(list.name)
+                .setSubtitle(list.sourceKind)
+                .setExtras(Bundle().apply { putString(SOURCE_KEY, list.key) })
+                .build()
             it.setMediaItems(items, start, 0)
             it.prepare()
             it.play()
@@ -151,6 +164,8 @@ class PlayerConnection(context: Context) {
             shuffle = player.shuffleModeEnabled,
             repeatOne = player.repeatMode == Player.REPEAT_MODE_ONE,
             source = player.playlistMetadata.title?.toString().orEmpty(),
+            sourceKind = player.playlistMetadata.subtitle?.toString().orEmpty(),
+            sourceKey = player.playlistMetadata.extras?.getString(SOURCE_KEY).orEmpty(),
         )
     }
 

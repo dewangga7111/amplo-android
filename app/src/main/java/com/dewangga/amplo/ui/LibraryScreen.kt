@@ -54,15 +54,19 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dewangga.amplo.AppViewModel
 import com.dewangga.amplo.R
+import com.dewangga.amplo.library.Collection
 import com.dewangga.amplo.library.ListKind
 import com.dewangga.amplo.library.SongList
 import com.dewangga.amplo.library.Sort
 import com.dewangga.amplo.library.Track
+import com.dewangga.amplo.library.findList
 import com.dewangga.amplo.library.likeKey
+import com.dewangga.amplo.library.names
 import com.dewangga.amplo.plural
 import com.dewangga.amplo.ui.theme.Amplo
 import com.dewangga.amplo.ui.theme.JetBrainsMono
@@ -73,7 +77,16 @@ fun LibraryScreen(model: AppViewModel) {
     val lists by model.lists.collectAsStateWithLifecycle()
     val player by model.player.playerState.collectAsStateWithLifecycle()
     var nowPlaying by rememberSaveable { mutableStateOf(false) }
-    var openKey by rememberSaveable { mutableStateOf<String?>(null) }
+    // The lists opened one from another, such as a playlist, then an album from one of its songs.
+    // Back goes to the one before.
+    var stack by rememberSaveable { mutableStateOf(listOf<String>()) }
+    // Opening a list that is open further back returns to it.
+    fun open(key: String) {
+        stack = stack.takeWhile { it != key } + key
+    }
+    fun back() {
+        stack = stack.dropLast(1)
+    }
     // The songs waiting for a playlist to go into, and for the name of a new one.
     var adding by remember { mutableStateOf<List<Track>?>(null) }
     var naming by remember { mutableStateOf<List<Track>?>(null) }
@@ -82,12 +95,15 @@ fun LibraryScreen(model: AppViewModel) {
     LaunchedEffect(player.trackId) {
         if (player.trackId == null) nowPlaying = false
     }
+    val openKey = stack.lastOrNull()
+    val open = remember(lists, openKey) { openKey?.let { key -> lists?.let { findList(key, it) } } }
     // A list can go away, such as Liked Songs when its last heart goes.
-    val open = lists?.firstOrNull { it.key == openKey }
-    LaunchedEffect(lists, openKey) {
-        if (openKey != null && lists != null && open == null) openKey = null
+    LaunchedEffect(lists, stack) {
+        val all = lists ?: return@LaunchedEffect
+        val left = stack.filter { findList(it, all) != null }
+        if (left != stack) stack = left
     }
-    BackHandler(enabled = openKey != null && !nowPlaying) { openKey = null }
+    BackHandler(enabled = stack.isNotEmpty() && !nowPlaying) { back() }
     Messages(model)
 
     Box(Modifier.fillMaxSize()) {
@@ -102,25 +118,26 @@ fun LibraryScreen(model: AppViewModel) {
                     Message("Reading your library…", null)
                 } else {
                     AnimatedContent(
-                        targetState = open,
-                        contentKey = { it?.key },
+                        targetState = stack.size to open,
+                        contentKey = { it.second?.key },
                         transitionSpec = {
-                            if (targetState != null) {
+                            if (targetState.first > initialState.first) {
                                 slideInHorizontally { it / 3 } + fadeIn() togetherWith fadeOut()
                             } else {
                                 fadeIn() togetherWith slideOutHorizontally { it / 3 } + fadeOut()
                             }
                         },
                         label = "list",
-                    ) { list ->
+                    ) { (_, list) ->
                         if (list == null) {
-                            Home(model, all, onOpen = { openKey = it }, onNewPlaylist = { naming = emptyList() })
+                            Home(model, all, onOpen = ::open, onNewPlaylist = { naming = emptyList() })
                         } else {
                             ListScreen(
                                 model,
                                 list,
                                 currentId = player.trackId,
-                                onBack = { openKey = null },
+                                onBack = ::back,
+                                onOpen = ::open,
                                 onAdd = { adding = it },
                             )
                         }
@@ -143,7 +160,15 @@ fun LibraryScreen(model: AppViewModel) {
             enter = slideInVertically { it } + fadeIn(),
             exit = slideOutVertically { it } + fadeOut(),
         ) {
-            NowPlaying(model, player, onClose = { nowPlaying = false })
+            NowPlaying(
+                model,
+                player,
+                onClose = { nowPlaying = false },
+                onOpen = { key ->
+                    nowPlaying = false
+                    open(key)
+                },
+            )
         }
     }
 
@@ -173,7 +198,7 @@ fun LibraryScreen(model: AppViewModel) {
                         naming = null
                         // A new empty playlist opens, so songs can go into it.
                         if (songs.isEmpty()) {
-                            openKey = key
+                            open(key)
                             nowPlaying = false
                         }
                     }
@@ -275,7 +300,7 @@ private fun ListRow(list: SongList, onClick: () -> Unit) {
             .padding(horizontal = 20.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        ListCover(list, 52.dp)
+        ListArt(list, 52.dp, corner = 8.dp)
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Text(list.name, style = MaterialTheme.typography.titleMedium, color = Amplo.Text, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -284,21 +309,42 @@ private fun ListRow(list: SongList, onClick: () -> Unit) {
     }
 }
 
-/** Liked Songs shows a heart. Other lists show the cover of their first song. */
+/**
+ * Liked Songs shows a heart and an album its cover. Other lists show the covers of their first
+ * four albums, or the cover of their first song when they have fewer.
+ */
 @Composable
-private fun ListCover(list: SongList, size: androidx.compose.ui.unit.Dp) {
+private fun ListArt(list: SongList, size: Dp, corner: Dp) {
     if (list.kind == ListKind.Liked) {
         Box(
             Modifier
                 .size(size)
-                .clip(RoundedCornerShape(8.dp))
+                .clip(RoundedCornerShape(corner))
                 .background(Amplo.Accent),
             contentAlignment = Alignment.Center,
         ) {
             Icon(painterResource(R.drawable.ic_heart_filled), null, Modifier.size(size * 0.45f), tint = Amplo.OnAccent)
         }
-    } else {
-        Cover(list.songs.firstOrNull()?.id, size, corner = 8.dp)
+        return
+    }
+    val covers = remember(list) {
+        if (list.kind == ListKind.Album) emptyList()
+        else list.songs.distinctBy { it.album.lowercase().ifEmpty { "#${it.id}" } }.take(4).map(Track::id)
+    }
+    if (covers.size < 4) {
+        Cover(list.songs.firstOrNull()?.id, size, corner = corner)
+        return
+    }
+    Column(
+        Modifier
+            .size(size)
+            .clip(RoundedCornerShape(corner)),
+    ) {
+        for (row in 0..1) {
+            Row {
+                for (column in 0..1) Cover(covers[row * 2 + column], size / 2, corner = 0.dp)
+            }
+        }
     }
 }
 
@@ -309,14 +355,15 @@ private fun ListScreen(
     list: SongList,
     currentId: Long?,
     onBack: () -> Unit,
+    onOpen: (String) -> Unit,
     onAdd: (List<Track>) -> Unit,
 ) {
     val sort by model.sort.collectAsStateWithLifecycle()
     val liked by model.liked.collectAsStateWithLifecycle()
-    fun play(index: Int, shuffle: Boolean?) = model.player.play(list.songs, index, shuffle, source = list.name)
+    fun play(index: Int, shuffle: Boolean?) = model.player.play(list, index, shuffle)
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 8.dp)) {
         item(key = "header") {
-            ListHeader(list, sort ?: Sort.RecentlyAdded, onBack, ::play, model::setSort)
+            ListHeader(list, sort ?: Sort.RecentlyAdded, onBack, onOpen, ::play, model::setSort)
         }
         if (list.songs.isEmpty()) {
             item(key = "empty") {
@@ -334,8 +381,10 @@ private fun ListScreen(
                 track,
                 current = track.id == currentId,
                 liked = track.likeKey in liked,
-                removeFrom = list.name.takeIf { list.kind != ListKind.All },
+                removeFrom = list.name.takeIf { list.kind == ListKind.Liked || list.kind == ListKind.Playlist },
+                links = remember(track, list.collection) { linksOf(track, list.collection) },
                 onClick = { play(index, null) },
+                onOpen = onOpen,
                 onLike = { model.toggleLike(track) },
                 onAdd = { onAdd(listOf(track)) },
                 onRemove = { model.removeFromList(list, listOf(track)) },
@@ -349,6 +398,7 @@ private fun ListHeader(
     list: SongList,
     sort: Sort,
     onBack: () -> Unit,
+    onOpen: (String) -> Unit,
     onPlay: (Int, Boolean?) -> Unit,
     onSort: (Sort) -> Unit,
 ) {
@@ -357,20 +407,46 @@ private fun ListHeader(
             .statusBarsPadding()
             .padding(start = 8.dp, end = 12.dp, top = 8.dp, bottom = 12.dp),
     ) {
-        RoundIconButton(R.drawable.ic_back, "Back to the library", onClick = onBack)
+        RoundIconButton(R.drawable.ic_back, "Back", onClick = onBack)
         Column(Modifier.padding(start = 12.dp, top = 8.dp)) {
-            Text(list.kind.label, style = MaterialTheme.typography.labelSmall, color = Amplo.Muted)
-            Spacer(Modifier.height(4.dp))
-            Text(list.name, style = MaterialTheme.typography.headlineMedium, color = Amplo.Text, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Spacer(Modifier.height(2.dp))
-            Text(describeSongs(list.songs.size, list.songs.sumOf { it.durationMs }), style = MaterialTheme.typography.bodySmall)
+            Row(verticalAlignment = Alignment.Bottom) {
+                ListArt(list, 112.dp, corner = 10.dp)
+                Spacer(Modifier.width(16.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(list.kind.label, style = MaterialTheme.typography.labelSmall, color = Amplo.Muted)
+                    Spacer(Modifier.height(4.dp))
+                    Text(list.name, style = MaterialTheme.typography.headlineMedium, color = Amplo.Text, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    // An album shows its artist, which opens their songs. Without an album artist,
+                    // the artists that every song names count.
+                    val artist = remember(list) {
+                        (list.collection as? Collection.Album)?.let { album ->
+                            album.artist.ifEmpty {
+                                names(list.songs.firstOrNull()?.artist.orEmpty())
+                                    .filter { name -> list.songs.all { song -> names(song.artist).any { it.equals(name, ignoreCase = true) } } }
+                                    .joinToString(", ")
+                            }
+                        }.orEmpty()
+                    }
+                    if (artist.isNotEmpty()) {
+                        Text(
+                            artistLinks(artist, onOpen),
+                            style = MaterialTheme.typography.bodyMedium.copy(color = Amplo.Soft),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Spacer(Modifier.height(2.dp))
+                    Text(describeSongs(list.songs.size, list.songs.sumOf { it.durationMs }), style = MaterialTheme.typography.bodySmall)
+                }
+            }
             if (list.songs.isNotEmpty()) {
                 Spacer(Modifier.height(16.dp))
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     PillButton("Play", R.drawable.ic_play, accent = true) { onPlay(0, false) }
                     PillButton("Shuffle", R.drawable.ic_shuffle, accent = false) { onPlay(0, true) }
                     Spacer(Modifier.weight(1f))
-                    SortButton(sort, onSort)
+                    // An album keeps the order of its discs and tracks.
+                    if (list.kind != ListKind.Album) SortButton(sort, onSort)
                 }
             }
         }
@@ -423,7 +499,9 @@ private fun SongRow(
     current: Boolean,
     liked: Boolean,
     removeFrom: String?,
+    links: List<Link>,
     onClick: () -> Unit,
+    onOpen: (String) -> Unit,
     onLike: () -> Unit,
     onAdd: () -> Unit,
     onRemove: () -> Unit,
@@ -459,16 +537,30 @@ private fun SongRow(
             style = MaterialTheme.typography.labelSmall.copy(fontFamily = JetBrainsMono),
             color = Amplo.Muted,
         )
-        SongMenu(track.title, liked, removeFrom, onLike, onAdd, onRemove)
+        SongMenu(track.title, liked, removeFrom, links, onOpen, onLike, onAdd, onRemove)
     }
 }
 
-/** Like, Add to playlist and Remove for one song. */
+/** A list a song links to, such as its album. */
+private data class Link(val label: String, val icon: Int, val key: String)
+
+/** The album and each artist of a song, except the list that is open. */
+private fun linksOf(track: Track, open: Collection?): List<Link> = buildList {
+    Collection.albumOf(track)?.takeIf { it.key != open?.key }?.let { add(Link("Go to album", R.drawable.ic_disc, it.key)) }
+    for (artist in names(track.artist).take(3)) {
+        if (open is Collection.Artist && open.name.equals(artist, ignoreCase = true)) continue
+        add(Link("Go to $artist", R.drawable.ic_person, Collection.Artist(artist).key))
+    }
+}
+
+/** Like, Add to playlist, the album and artists, and Remove for one song. */
 @Composable
 private fun SongMenu(
     title: String,
     liked: Boolean,
     removeFrom: String?,
+    links: List<Link>,
+    onOpen: (String) -> Unit,
     onLike: () -> Unit,
     onAdd: () -> Unit,
     onRemove: () -> Unit,
@@ -489,6 +581,12 @@ private fun SongMenu(
             MenuItem("Add to playlist", R.drawable.ic_plus) {
                 open = false
                 onAdd()
+            }
+            for (link in links) {
+                MenuItem(link.label, link.icon) {
+                    open = false
+                    onOpen(link.key)
+                }
             }
             if (removeFrom != null) {
                 MenuItem("Remove from $removeFrom", R.drawable.ic_close) {

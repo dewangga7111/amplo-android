@@ -51,13 +51,22 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dewangga.amplo.AppViewModel
 import com.dewangga.amplo.R
+import com.dewangga.amplo.library.Collection
+import com.dewangga.amplo.library.Track
 import com.dewangga.amplo.library.likeKey
 import com.dewangga.amplo.playback.AudioShape
 import com.dewangga.amplo.playback.AudioTap
@@ -75,7 +84,7 @@ private const val VISUALIZER_BARS = 28
 
 /** The playing song on the whole screen, with its cover or the queue, and every control. */
 @Composable
-fun NowPlaying(model: AppViewModel, state: PlayerState, onClose: () -> Unit) {
+fun NowPlaying(model: AppViewModel, state: PlayerState, onClose: () -> Unit, onOpen: (String) -> Unit) {
     BackHandler(onBack = onClose)
     val player = model.player
     var showQueue by remember { mutableStateOf(false) }
@@ -122,7 +131,7 @@ fun NowPlaying(model: AppViewModel, state: PlayerState, onClose: () -> Unit) {
             .navigationBarsPadding()
             .padding(horizontal = 24.dp),
     ) {
-        Header(state.source, showQueue, onClose, onQueue = { showQueue = !showQueue })
+        Header(state, showQueue, onClose, onQueue = { showQueue = !showQueue }, onOpen = onOpen)
         Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
             if (showQueue) {
                 QueueCard(state, player)
@@ -133,7 +142,7 @@ fun NowPlaying(model: AppViewModel, state: PlayerState, onClose: () -> Unit) {
             }
         }
         Spacer(Modifier.height(20.dp))
-        SongInfo(state, model, position)
+        SongInfo(state, model, position, onOpen)
         Spacer(Modifier.height(14.dp))
         Visualizer(analyzer, frame)
         Spacer(Modifier.height(10.dp))
@@ -153,13 +162,22 @@ private fun monoStyle(size: Int, weight: FontWeight = FontWeight.Medium) =
     MaterialTheme.typography.labelSmall.copy(fontFamily = JetBrainsMono, fontWeight = weight, fontSize = size.sp)
 
 @Composable
-private fun Header(source: String, showQueue: Boolean, onClose: () -> Unit, onQueue: () -> Unit) {
+private fun Header(state: PlayerState, showQueue: Boolean, onClose: () -> Unit, onQueue: () -> Unit, onOpen: (String) -> Unit) {
     Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         RoundIconButton(R.drawable.ic_chevron_down, "Back to song list", modifier = Modifier.padding(end = 8.dp), onClick = onClose)
-        Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("PLAYING FROM", style = monoStyle(10), color = Amplo.Muted, letterSpacing = 1.sp)
+        // A tap opens the list the queue came from.
+        val source = state.sourceKey.takeIf(String::isNotEmpty)
+        Column(
+            Modifier
+                .weight(1f)
+                .clip(RoundedCornerShape(8.dp))
+                .then(if (source != null) Modifier.clickable(onClickLabel = "Open ${state.source}") { onOpen(source) } else Modifier)
+                .padding(vertical = 2.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text("PLAYING FROM ${state.sourceKind}".trim(), style = monoStyle(10), color = Amplo.Muted, letterSpacing = 1.sp)
             Text(
-                source.ifEmpty { "Queue" },
+                state.source.ifEmpty { "Queue" },
                 style = MaterialTheme.typography.labelLarge,
                 color = Amplo.Text,
                 maxLines = 1,
@@ -177,7 +195,7 @@ private fun Header(source: String, showQueue: Boolean, onClose: () -> Unit, onQu
 }
 
 @Composable
-private fun SongInfo(state: PlayerState, model: AppViewModel, position: MutableLongState) {
+private fun SongInfo(state: PlayerState, model: AppViewModel, position: MutableLongState, onOpen: (String) -> Unit) {
     val shape by AudioTap.shape.collectAsStateWithLifecycle()
     val liked by model.liked.collectAsStateWithLifecycle()
     val lists by model.lists.collectAsStateWithLifecycle()
@@ -193,13 +211,28 @@ private fun SongInfo(state: PlayerState, model: AppViewModel, position: MutableL
                 color = Amplo.Text,
                 maxLines = 1,
             )
+            // Each artist opens their songs, once the library knows the song.
+            val artist = remember(state.artist, track) {
+                if (track == null || state.artist.isEmpty()) AnnotatedString(state.artist.ifEmpty { "Unknown artist" })
+                else artistLinks(state.artist, onOpen)
+            }
             Text(
-                state.artist.ifEmpty { "Unknown artist" },
+                artist,
                 Modifier.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 2000),
-                style = MaterialTheme.typography.bodyLarge,
-                color = Amplo.Soft,
+                style = MaterialTheme.typography.bodyLarge.copy(color = Amplo.Soft),
                 maxLines = 1,
             )
+            // The album and each genre open their songs too.
+            val details = remember(track) { track?.let { detailLinks(it, onOpen) } }
+            if (details != null && details.isNotEmpty()) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    details,
+                    Modifier.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 2000),
+                    style = MaterialTheme.typography.bodyMedium.copy(color = Amplo.Muted),
+                    maxLines = 1,
+                )
+            }
         }
         if (track != null) {
             RoundIconButton(
@@ -219,6 +252,19 @@ private fun SongInfo(state: PlayerState, model: AppViewModel, position: MutableL
                 Text(line, style = monoStyle(10), color = Amplo.Muted)
             }
         }
+    }
+}
+
+/** "Album · Genre, Genre", with the album and each genre as a link. Empty when the song has neither. */
+private fun detailLinks(track: Track, onOpen: (String) -> Unit): AnnotatedString = buildAnnotatedString {
+    Collection.albumOf(track)?.let { album ->
+        withLink(LinkAnnotation.Clickable("album", TextLinkStyles(pressedStyle = SpanStyle(color = Amplo.Accent))) { onOpen(album.key) }) {
+            append(track.album)
+        }
+    }
+    if (track.genre.isNotBlank()) {
+        if (length > 0) append("  ·  ")
+        append(nameLinks(track.genre, Collection::Genre, onOpen))
     }
 }
 

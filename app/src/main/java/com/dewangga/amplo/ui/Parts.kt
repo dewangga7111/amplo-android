@@ -30,10 +30,17 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.dewangga.amplo.R
+import com.dewangga.amplo.library.Collection
 import com.dewangga.amplo.library.Covers
+import com.dewangga.amplo.library.splitNames
 import com.dewangga.amplo.ui.theme.Amplo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -135,3 +142,19 @@ fun describeSongs(count: Int, totalMs: Long): String {
     }
     return "$songs, $length"
 }
+
+/** Names that open a list look like the text around them, and take the accent while pressed. */
+private val linkStyles = TextLinkStyles(pressedStyle = SpanStyle(color = Amplo.Accent))
+
+/** [text] with each name in it, as an artist or genre tag lists them, as a link to [collection] of that name. */
+fun nameLinks(text: String, collection: (String) -> Collection, onOpen: (String) -> Unit): AnnotatedString =
+    buildAnnotatedString {
+        append(text)
+        for (range in splitNames(text)) {
+            val name = text.substring(range)
+            addLink(LinkAnnotation.Clickable(name, linkStyles) { onOpen(collection(name).key) }, range.first, range.last + 1)
+        }
+    }
+
+/** An artist tag in which each artist opens their songs. */
+fun artistLinks(text: String, onOpen: (String) -> Unit): AnnotatedString = nameLinks(text, Collection::Artist, onOpen)
