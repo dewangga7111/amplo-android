@@ -10,7 +10,12 @@ import android.provider.MediaStore.Audio.Media
 /** The address of a song for the player and for its cover. */
 fun songUri(id: Long): Uri = ContentUris.withAppendedId(Media.EXTERNAL_CONTENT_URI, id)
 
-/** Reads every song of the device from MediaStore. Ringtones, alarms and notifications are left out. */
+/**
+ * Reads every song of the device from MediaStore. Ringtones, alarms and notifications are left
+ * out. The paths come from the DATA column, which newer Android still fills for reading, so
+ * playlists can point to songs as on a computer.
+ */
+@Suppress("DEPRECATION")
 object MediaStoreScanner {
     fun scan(context: Context): List<Track> {
         val newer = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
@@ -24,6 +29,7 @@ object MediaStoreScanner {
             add(Media.DURATION)
             add(Media.DATE_ADDED)
             add(Media.SIZE)
+            add(Media.DATA)
             if (newer) {
                 add(Media.ALBUM_ARTIST)
                 add(Media.GENRE)
@@ -55,6 +61,7 @@ object MediaStoreScanner {
             val cdTrack = if (newer) column(Media.CD_TRACK_NUMBER) else -1
             val disc = if (newer) column(Media.DISC_NUMBER) else -1
             val size = column(Media.SIZE)
+            val data = column(Media.DATA)
             val bitrate = if (newer) column(Media.BITRATE) else -1
             while (cursor.moveToNext()) {
                 val fileName = cursor.getString(file).orEmpty().substringBeforeLast('.')
@@ -89,6 +96,7 @@ object MediaStoreScanner {
                         cursor.getLong(size),
                         cursor.getLong(duration),
                     ),
+                    path = cursor.getString(data).orEmpty(),
                 )
             }
         }

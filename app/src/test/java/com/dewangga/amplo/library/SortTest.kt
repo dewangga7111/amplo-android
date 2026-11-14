@@ -51,6 +51,13 @@ class SortTest {
     }
 
     @Test
+    fun a_playlist_shows_its_last_songs_first_as_recently_added() {
+        val songs = listOf(track(1, "b", added = 30), track(2, "c", added = 10), track(3, "a", added = 20))
+        assertEquals(listOf("a", "c", "b"), songs.sortedAsPlaylist(Sort.RecentlyAdded).titles())
+        assertEquals(listOf("a", "b", "c"), songs.sortedAsPlaylist(Sort.Title).titles())
+    }
+
+    @Test
     fun reads_keys_and_names_from_files() {
         assertEquals(Sort.Artist, Sort.fromKey("artist"))
         assertEquals(null, Sort.fromKey("size"))

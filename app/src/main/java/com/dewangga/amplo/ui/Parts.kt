@@ -123,10 +123,15 @@ fun formatDuration(ms: Long): String {
     return if (hours > 0) "%d:%02d:%02d".format(hours, minutes, rest) else "%d:%02d".format(minutes, rest)
 }
 
-/** "12 songs, 48 min", or "1 song, 3 min". */
+/** "12 songs, 48 min", "1 song, 3 min", "1 song, 29 sec", or "0 songs". */
 fun describeSongs(count: Int, totalMs: Long): String {
     val songs = if (count == 1) "1 song" else "$count songs"
+    if (count == 0) return songs
     val minutes = totalMs / 60_000
-    val length = if (minutes >= 60) "${minutes / 60} h ${minutes % 60} min" else "$minutes min"
+    val length = when {
+        minutes >= 60 -> "${minutes / 60} h ${minutes % 60} min"
+        minutes > 0 -> "$minutes min"
+        else -> "${totalMs / 1000} sec"
+    }
     return "$songs, $length"
 }

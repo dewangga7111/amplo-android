@@ -18,6 +18,8 @@ data class Track(
     val added: Long,
     /** The average bitrate in kbit/s, or 0 when unknown. */
     val bitrate: Int = 0,
+    /** The full path of the file, such as "/storage/emulated/0/Music/song.flac". Playlists point to songs by it. */
+    val path: String = "",
 )
 
 /** The order of every song list except albums and the queue. */
@@ -61,3 +63,10 @@ fun nameFromFile(name: String): Pair<String, String> {
     val artist = name.substring(at + 3).trim()
     return if (artist.isEmpty()) name.trim() to "" else name.substring(0, at).trim() to artist
 }
+
+/**
+ * The songs of a playlist file in the order of [sort]. The songs added to a playlist last are at
+ * its end, so they come first as the recently added ones.
+ */
+fun List<Track>.sortedAsPlaylist(sort: Sort): List<Track> =
+    if (sort == Sort.RecentlyAdded) asReversed().toList() else sortedBy(sort)

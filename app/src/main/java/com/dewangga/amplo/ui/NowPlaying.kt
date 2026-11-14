@@ -58,6 +58,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dewangga.amplo.AppViewModel
 import com.dewangga.amplo.R
+import com.dewangga.amplo.library.likeKey
 import com.dewangga.amplo.playback.AudioShape
 import com.dewangga.amplo.playback.AudioTap
 import com.dewangga.amplo.playback.Analyzer
@@ -178,7 +179,11 @@ private fun Header(source: String, showQueue: Boolean, onClose: () -> Unit, onQu
 @Composable
 private fun SongInfo(state: PlayerState, model: AppViewModel, position: MutableLongState) {
     val shape by AudioTap.shape.collectAsStateWithLifecycle()
-    val bitrate = remember(state.trackId) { state.trackId?.let(model::track)?.bitrate ?: 0 }
+    val liked by model.liked.collectAsStateWithLifecycle()
+    val lists by model.lists.collectAsStateWithLifecycle()
+    // The lists change when the library is read again, which can find the song.
+    val track = remember(state.trackId, lists) { state.trackId?.let(model::track) }
+    val isLiked = track != null && track.likeKey in liked
     Row(verticalAlignment = Alignment.Bottom) {
         Column(Modifier.weight(1f)) {
             Text(
@@ -196,11 +201,21 @@ private fun SongInfo(state: PlayerState, model: AppViewModel, position: MutableL
                 maxLines = 1,
             )
         }
-        Spacer(Modifier.width(16.dp))
+        if (track != null) {
+            RoundIconButton(
+                if (isLiked) R.drawable.ic_heart_filled else R.drawable.ic_heart,
+                if (isLiked) "Unlike" else "Like",
+                modifier = Modifier.padding(horizontal = 4.dp),
+                size = 44.dp,
+                iconSize = 22.dp,
+                tint = if (isLiked) Amplo.Accent else Amplo.Soft,
+            ) { model.toggleLike(track) }
+        }
+        Spacer(Modifier.width(8.dp))
         Column(horizontalAlignment = Alignment.End) {
             // Only this text changes every second, so only it reads the position.
             ElapsedTime(position)
-            techLines(bitrate, shape).forEach { line ->
+            techLines(track?.bitrate ?: 0, shape).forEach { line ->
                 Text(line, style = monoStyle(10), color = Amplo.Muted)
             }
         }
