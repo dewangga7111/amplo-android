@@ -88,7 +88,8 @@ fun PermissionScreen(onAllowed: () -> Unit) {
                 PillButton("Allow access", R.drawable.ic_check, accent = true) {
                     val permissions = buildList {
                         add(audioPermission)
-                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                        // Android 10 reads the music folder as before with requestLegacyExternalStorage, so it needs this too.
+                        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.Q) add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.POST_NOTIFICATIONS)
                     }
                     ask.launch(permissions.toTypedArray())

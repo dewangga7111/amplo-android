@@ -14,7 +14,10 @@ import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.dewangga.amplo.library.Extra
 import com.dewangga.amplo.library.ListKind
+import com.dewangga.amplo.library.Lyrics
+import com.dewangga.amplo.library.LyricsFiles
 import com.dewangga.amplo.library.M3u
 import com.dewangga.amplo.library.MediaStoreScanner
 import com.dewangga.amplo.library.NeedsConsent
@@ -35,6 +38,8 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
@@ -49,13 +54,17 @@ import kotlinx.coroutines.withTimeoutOrNull
 private val Context.settings by preferencesDataStore("settings")
 private val SORT = stringPreferencesKey("sort")
 private val LIKED = stringSetPreferencesKey("liked")
+private val LYRICS_EXTRA = stringPreferencesKey("lyrics_extra")
 private const val TAG = "amplo"
 
 /** The songs and playlists of the device, as read together. */
 private data class Library(val tracks: List<Track>, val playlists: List<Playlist>, val missing: Int)
 
-/** A change to a playlist that waits for the user to allow it. */
-class Consent(val request: IntentSender, internal val retry: () -> Unit)
+/** A change to a playlist or lyrics file that waits for the user to allow it. */
+class Consent(val request: IntentSender, internal val retry: () -> Unit, internal val denied: () -> Unit)
+
+/** The lyrics of [track], or null when it has none. */
+data class SongLyrics(val track: Track, val lyrics: Lyrics?)
 
 /** The library, the sort, the likes and the player, shared by the screens. */
 class AppViewModel(application: Application) : AndroidViewModel(application) {
@@ -105,7 +114,33 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     val player = PlayerConnection(application)
 
+    private val lyricsFlow = MutableStateFlow<SongLyrics?>(null)
+    /** The lyrics of the song that plays. Null until they are read, and while no song plays. */
+    val lyrics: StateFlow<SongLyrics?> = lyricsFlow.asStateFlow()
+
+    /** What shows under each lyric line when the lyrics have it: nothing, romaji or a translation. */
+    val lyricsExtra: StateFlow<Extra?> = application.settings.data
+        .map { settings -> Extra.entries.firstOrNull { it.name == settings[LYRICS_EXTRA] } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
     private var scan: Job? = null
+
+    init {
+        // The lyrics follow the song, and are read again with the library, as a computer may
+        // have copied them since.
+        viewModelScope.launch {
+            combine(player.playerState.map { it.trackId }.distinctUntilChanged(), library) { id, library ->
+                id?.let { library?.tracks?.firstOrNull { track -> track.id == it } }
+            }.collectLatest { track ->
+                if (track == null) {
+                    lyricsFlow.value = null
+                    return@collectLatest
+                }
+                if (lyricsFlow.value?.track?.id != track.id) lyricsFlow.value = null
+                lyricsFlow.value = SongLyrics(track, withContext(Dispatchers.IO) { LyricsFiles.read(context, track) })
+            }
+        }
+    }
 
     /** Reads the library again a moment after MediaStore changes, such as when songs are copied. */
     private val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
@@ -204,11 +239,54 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** Answers the question Android asked the user about changing a playlist file. */
+    /** Answers the question Android asked the user about changing a file. */
     fun answerConsent(allowed: Boolean) {
         val waiting = consentFlow.value ?: return
         consentFlow.value = null
-        if (allowed) waiting.retry() else notify("The playlist was not changed.")
+        if (allowed) waiting.retry() else waiting.denied()
+    }
+
+    /** Shows the next of nothing, romaji and translation under each line of [lyrics]. */
+    fun cycleLyricsExtra(lyrics: Lyrics) {
+        val choices = lyrics.extraChoices
+        val current = choices.indexOf(lyricsExtra.value?.takeIf(lyrics::has)).coerceAtLeast(0)
+        val next = choices[(current + 1) % choices.size]
+        viewModelScope.launch {
+            context.settings.edit { if (next == null) it.remove(LYRICS_EXTRA) else it[LYRICS_EXTRA] = next.name }
+        }
+    }
+
+    /**
+     * Saves [text] as the `.lrc` file beside [track]. [done] gets null once it is saved, or a
+     * message why it was not.
+     */
+    fun saveLyrics(track: Track, text: String, done: (error: String?) -> Unit) = saveLyrics(track, text, false, done)
+
+    private fun saveLyrics(track: Track, text: String, allowed: Boolean, done: (String?) -> Unit) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { LyricsFiles.write(context, track, text) }
+            } catch (need: NeedsConsent) {
+                // Asking again after the user allowed it would not end.
+                if (allowed) return@launch done("Android did not let amplo change the lyrics of ${track.title}.")
+                consentFlow.value = Consent(
+                    need.request,
+                    retry = { saveLyrics(track, text, true, done) },
+                    denied = { done("The lyrics were not changed.") },
+                )
+                return@launch
+            } catch (error: IllegalArgumentException) {
+                return@launch done(error.message)
+            } catch (error: Exception) {
+                Log.w(TAG, "Could not save the lyrics of ${track.path}", error)
+                return@launch done("Could not save the lyrics: ${error.message}")
+            }
+            if (lyricsFlow.value?.track?.id == track.id || player.playerState.value.trackId == track.id) {
+                lyricsFlow.value = SongLyrics(track, Lyrics.parse(text))
+            }
+            notify("Saved the lyrics of ${track.title.ifEmpty { "this song" }}.")
+            done(null)
+        }
     }
 
     /** Changes the text of a playlist file, then reads the playlists again. */
@@ -233,8 +311,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 }
             } catch (need: NeedsConsent) {
                 // Asking again after the user allowed it would not end.
-                if (allowed) notify("Android did not let amplo change ${playlist.name}.")
-                else consentFlow.value = Consent(need.request) { change(playlist, edit, allowed = true, message) }
+                if (allowed) {
+                    notify("Android did not let amplo change ${playlist.name}.")
+                } else {
+                    consentFlow.value = Consent(
+                        need.request,
+                        retry = { change(playlist, edit, allowed = true, message) },
+                        denied = { notify("The playlist was not changed.") },
+                    )
+                }
             } catch (error: Exception) {
                 Log.w(TAG, "Could not change ${playlist.path}", error)
                 notify("Could not change the playlist: ${error.message}")

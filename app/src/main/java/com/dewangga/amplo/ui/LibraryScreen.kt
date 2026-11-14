@@ -77,6 +77,7 @@ fun LibraryScreen(model: AppViewModel) {
     val lists by model.lists.collectAsStateWithLifecycle()
     val player by model.player.playerState.collectAsStateWithLifecycle()
     var nowPlaying by rememberSaveable { mutableStateOf(false) }
+    val panel = rememberSaveable { mutableStateOf(Panel.Cover) }
     // The lists opened one from another, such as a playlist, then an album from one of its songs.
     // Back goes to the one before.
     var stack by rememberSaveable { mutableStateOf(listOf<String>()) }
@@ -163,6 +164,7 @@ fun LibraryScreen(model: AppViewModel) {
             NowPlaying(
                 model,
                 player,
+                panel,
                 onClose = { nowPlaying = false },
                 onOpen = { key ->
                     nowPlaying = false

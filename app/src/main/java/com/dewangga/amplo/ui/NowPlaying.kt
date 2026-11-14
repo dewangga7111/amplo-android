@@ -34,6 +34,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.MutableLongState
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -50,6 +51,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.AnnotatedString
@@ -66,6 +68,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dewangga.amplo.AppViewModel
 import com.dewangga.amplo.R
 import com.dewangga.amplo.library.Collection
+import com.dewangga.amplo.library.LyricsFiles
 import com.dewangga.amplo.library.Track
 import com.dewangga.amplo.library.likeKey
 import com.dewangga.amplo.playback.AudioShape
@@ -78,16 +81,38 @@ import com.dewangga.amplo.playback.QueueEntry
 import com.dewangga.amplo.ui.theme.Amplo
 import com.dewangga.amplo.ui.theme.JetBrainsMono
 import com.dewangga.amplo.ui.theme.SpaceGrotesk
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private const val VISUALIZER_BARS = 28
 
+/** What shows in the big square of Now Playing. */
+enum class Panel { Cover, Lyrics, Queue }
+
 /** The playing song on the whole screen, with its cover or the queue, and every control. */
 @Composable
-fun NowPlaying(model: AppViewModel, state: PlayerState, onClose: () -> Unit, onOpen: (String) -> Unit) {
+fun NowPlaying(
+    model: AppViewModel,
+    state: PlayerState,
+    panelState: MutableState<Panel>,
+    onClose: () -> Unit,
+    onOpen: (String) -> Unit,
+) {
     BackHandler(onBack = onClose)
     val player = model.player
-    var showQueue by remember { mutableStateOf(false) }
+    // Kept by the library screen, so Now Playing opens again as it was left.
+    var panel by panelState
+    // The song whose lyrics are being written, and their text when the form opened.
+    var editing by remember { mutableStateOf<Pair<Track, String>?>(null) }
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    fun edit(track: Track) {
+        scope.launch {
+            val text = withContext(Dispatchers.IO) { LyricsFiles.readText(context, track) }.orEmpty().replace("\r\n", "\n")
+            editing = track to text
+        }
+    }
     val position = remember { mutableLongStateOf(player.positionMs) }
     val frame = remember { mutableLongStateOf(0L) }
     val analyzer = remember { Analyzer(VISUALIZER_BARS) }
@@ -108,7 +133,6 @@ fun NowPlaying(model: AppViewModel, state: PlayerState, onClose: () -> Unit, onO
     }
 
     // Dragging the screen down closes it.
-    val scope = rememberCoroutineScope()
     val drag = remember { Animatable(0f) }
     val closeDistance = with(LocalDensity.current) { 140.dp.toPx() }
     Column(
@@ -131,12 +155,18 @@ fun NowPlaying(model: AppViewModel, state: PlayerState, onClose: () -> Unit, onO
             .navigationBarsPadding()
             .padding(horizontal = 24.dp),
     ) {
-        Header(state, showQueue, onClose, onQueue = { showQueue = !showQueue }, onOpen = onOpen)
+        Header(
+            state,
+            panel,
+            onClose,
+            onPanel = { panel = if (panel == it) Panel.Cover else it },
+            onOpen = onOpen,
+        )
         Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-            if (showQueue) {
-                QueueCard(state, player)
-            } else {
-                BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            when (panel) {
+                Panel.Queue -> QueueCard(state, player)
+                Panel.Lyrics -> LyricsCard(model, state, position, onEdit = ::edit)
+                Panel.Cover -> BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Cover(state.trackId, minOf(maxWidth, maxHeight), corner = 14.dp)
                 }
             }
@@ -155,6 +185,23 @@ fun NowPlaying(model: AppViewModel, state: PlayerState, onClose: () -> Unit, onO
         Transport(state, player)
         Spacer(Modifier.height(16.dp))
     }
+
+    editing?.let { (track, text) ->
+        LyricsEditor(
+            title = track.title.ifEmpty { "This song" },
+            initial = text,
+            onDismiss = { editing = null },
+            onSave = { lyrics, done ->
+                model.saveLyrics(track, lyrics) { error ->
+                    done(error)
+                    if (error == null) {
+                        editing = null
+                        panel = Panel.Lyrics
+                    }
+                }
+            },
+        )
+    }
 }
 
 @Composable
@@ -162,7 +209,7 @@ private fun monoStyle(size: Int, weight: FontWeight = FontWeight.Medium) =
     MaterialTheme.typography.labelSmall.copy(fontFamily = JetBrainsMono, fontWeight = weight, fontSize = size.sp)
 
 @Composable
-private fun Header(state: PlayerState, showQueue: Boolean, onClose: () -> Unit, onQueue: () -> Unit, onOpen: (String) -> Unit) {
+private fun Header(state: PlayerState, panel: Panel, onClose: () -> Unit, onPanel: (Panel) -> Unit, onOpen: (String) -> Unit) {
     Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         RoundIconButton(R.drawable.ic_chevron_down, "Back to song list", modifier = Modifier.padding(end = 8.dp), onClick = onClose)
         // A tap opens the list the queue came from.
@@ -185,12 +232,16 @@ private fun Header(state: PlayerState, showQueue: Boolean, onClose: () -> Unit, 
             )
         }
         RoundIconButton(
-            R.drawable.ic_queue,
-            if (showQueue) "Show the cover" else "Show the queue",
+            R.drawable.ic_lyrics,
+            if (panel == Panel.Lyrics) "Show the cover" else "Show the lyrics",
             modifier = Modifier.padding(start = 8.dp),
-            tint = if (showQueue) Amplo.Accent else Amplo.Text,
-            onClick = onQueue,
-        )
+            tint = if (panel == Panel.Lyrics) Amplo.Accent else Amplo.Text,
+        ) { onPanel(Panel.Lyrics) }
+        RoundIconButton(
+            R.drawable.ic_queue,
+            if (panel == Panel.Queue) "Show the cover" else "Show the queue",
+            tint = if (panel == Panel.Queue) Amplo.Accent else Amplo.Text,
+        ) { onPanel(Panel.Queue) }
     }
 }
 
