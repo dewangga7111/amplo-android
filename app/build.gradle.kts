@@ -16,8 +16,23 @@ android {
         versionName = "0.1.0"
     }
 
+    // The release key is kept outside the repository. Its path and passwords come from
+    // ~/.gradle/gradle.properties. Without them, the release APK is not signed.
+    val releaseStore = providers.gradleProperty("AMPLO_RELEASE_STORE_FILE").orNull
+    signingConfigs {
+        if (releaseStore != null) {
+            create("release") {
+                storeFile = file(releaseStore)
+                storePassword = providers.gradleProperty("AMPLO_RELEASE_STORE_PASSWORD").get()
+                keyAlias = providers.gradleProperty("AMPLO_RELEASE_KEY_ALIAS").get()
+                keyPassword = providers.gradleProperty("AMPLO_RELEASE_KEY_PASSWORD").get()
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (releaseStore != null) signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
