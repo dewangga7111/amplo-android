@@ -31,6 +31,7 @@ import com.dewangga.amplo.library.likeKey
 import com.dewangga.amplo.library.sortedAsPlaylist
 import com.dewangga.amplo.library.sortedBy
 import com.dewangga.amplo.playback.PlayerConnection
+import com.dewangga.amplo.spotify.SpotifyModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -113,6 +114,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     val consent: StateFlow<Consent?> = consentFlow.asStateFlow()
 
     val player = PlayerConnection(application)
+
+    /** The Spotify login and the playlists read with it. */
+    val spotify = SpotifyModel(application, viewModelScope)
 
     private val lyricsFlow = MutableStateFlow<SongLyrics?>(null)
     /** The lyrics of the song that plays. Null until they are read, and while no song plays. */
@@ -236,6 +240,33 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             // The lists follow the library a moment later, and the screen opens the new one by its key.
             withTimeoutOrNull(2000) { lists.first { all -> all?.any { it.key == key } == true } }
             done(key, null)
+        }
+    }
+
+    /**
+     * Saves the songs found for a Spotify playlist as a playlist in Music/Playlists. A taken name
+     * gets a number. [missing] counts the songs that were not found. [done] gets the key of the
+     * new list once the library shows it.
+     */
+    fun importPlaylist(name: String, songs: List<Track>, missing: Int, done: (key: String) -> Unit) {
+        if (songs.isEmpty()) return notify("None of these songs are in your music folder yet.")
+        viewModelScope.launch {
+            val taken = library.value?.playlists.orEmpty().map(Playlist::name)
+            val path = try {
+                withContext(Dispatchers.IO) { PlaylistFiles.createNumbered(context, name, songs, taken) }
+            } catch (error: IllegalArgumentException) {
+                return@launch notify(error.message.orEmpty())
+            } catch (error: Exception) {
+                Log.w(TAG, "Could not import a Spotify playlist", error)
+                return@launch notify("Could not create the playlist: ${error.message}")
+            }
+            scan?.cancel()
+            library.value = read()
+            val imported = "Imported ${plural(songs.size)} as “${M3u.displayName(path.substringAfterLast('/'))}”."
+            notify(if (missing == 0) imported else "$imported Left out ${plural(missing)} not in your folder.")
+            val key = SongList.playlistKey(path)
+            withTimeoutOrNull(2000) { lists.first { all -> all?.any { it.key == key } == true } }
+            done(key)
         }
     }
 

@@ -97,11 +97,18 @@ fun LibraryScreen(model: AppViewModel) {
         if (player.trackId == null) nowPlaying = false
     }
     val openKey = stack.lastOrNull()
-    val open = remember(lists, openKey) { openKey?.let { key -> lists?.let { findList(key, it) } } }
+    // The open list, or the key of the Spotify page that is open.
+    val open: Any? = remember(lists, openKey) {
+        when {
+            openKey == null -> null
+            isSpotifyKey(openKey) -> openKey
+            else -> lists?.let { findList(openKey, it) }
+        }
+    }
     // A list can go away, such as Liked Songs when its last heart goes.
     LaunchedEffect(lists, stack) {
         val all = lists ?: return@LaunchedEffect
-        val left = stack.filter { findList(it, all) != null }
+        val left = stack.filter { isSpotifyKey(it) || findList(it, all) != null }
         if (left != stack) stack = left
     }
     BackHandler(enabled = stack.isNotEmpty() && !nowPlaying) { back() }
@@ -120,7 +127,7 @@ fun LibraryScreen(model: AppViewModel) {
                 } else {
                     AnimatedContent(
                         targetState = stack.size to open,
-                        contentKey = { it.second?.key },
+                        contentKey = { (it.second as? SongList)?.key ?: it.second },
                         transitionSpec = {
                             if (targetState.first > initialState.first) {
                                 slideInHorizontally { it / 3 } + fadeIn() togetherWith fadeOut()
@@ -130,10 +137,10 @@ fun LibraryScreen(model: AppViewModel) {
                         },
                         label = "list",
                     ) { (_, list) ->
-                        if (list == null) {
-                            Home(model, all, onOpen = ::open, onNewPlaylist = { naming = emptyList() })
-                        } else {
-                            ListScreen(
+                        when (list) {
+                            null -> Home(model, all, onOpen = ::open, onNewPlaylist = { naming = emptyList() })
+                            is String -> SpotifyScreen(model, list, onBack = ::back, onOpen = ::open)
+                            is SongList -> ListScreen(
                                 model,
                                 list,
                                 currentId = player.trackId,
@@ -288,6 +295,35 @@ private fun Home(model: AppViewModel, lists: List<SongList>, onOpen: (String) ->
                     style = MaterialTheme.typography.bodySmall,
                     color = Amplo.Warning,
                 )
+            }
+        }
+        item(key = "spotify") {
+            Text(
+                "SPOTIFY",
+                Modifier.padding(start = 20.dp, end = 12.dp, top = 20.dp, bottom = 4.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = Amplo.Muted,
+            )
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable { onOpen(SPOTIFY) }
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier
+                        .size(52.dp)
+                        .background(Amplo.Mini, RoundedCornerShape(8.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(painterResource(R.drawable.ic_cloud), null, Modifier.size(24.dp), tint = Amplo.Accent)
+                }
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Spotify", style = MaterialTheme.typography.titleMedium, color = Amplo.Text)
+                    Text("Your playlists, and which songs you have", style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
         }
     }

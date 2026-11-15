@@ -2,6 +2,7 @@ package com.dewangga.amplo
 
 import android.Manifest
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Build
@@ -33,6 +34,9 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
         )
         super.onCreate(savedInstanceState)
+        // Debug builds can show made-up Spotify playlists: am start -n <app>/.MainActivity --ez amplo.spotify_sample true
+        val debuggable = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
+        if (debuggable && intent.getBooleanExtra("amplo.spotify_sample", false)) model.spotify.showSample()
         setContent {
             AmploTheme { App(model) }
         }

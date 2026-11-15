@@ -138,6 +138,23 @@ object PlaylistFiles {
         return file.path
     }
 
+    /**
+     * Like [create], but a name that is taken gets a number: `Mix`, then `Mix 2`, `Mix 3`, and so
+     * on. [taken] holds the names of the playlists the library shows, which can live in other
+     * folders.
+     */
+    fun createNumbered(context: Context, name: String, tracks: List<Track>, taken: List<String>): String {
+        val fileName = M3u.fileNameFor(name) ?: throw IllegalArgumentException("Type a name for the playlist.")
+        val shown = taken.map(String::lowercase).toSet()
+        for (number in 1 until 1000) {
+            val candidate = if (number == 1) fileName else "$fileName $number"
+            if (M3u.displayName("$candidate.m3u").lowercase() in shown) continue
+            if (exists(context, File(newFolder, "$candidate.m3u")) || exists(context, File(newFolder, "$candidate.m3u8"))) continue
+            return create(context, candidate, tracks)
+        }
+        throw IllegalArgumentException("Too many playlists are named “$fileName”.")
+    }
+
     /** MediaStore knows the files that amplo cannot see directly on newer Android. */
     private fun exists(context: Context, file: File): Boolean {
         if (file.exists()) return true

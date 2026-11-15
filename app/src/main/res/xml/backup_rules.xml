@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Spotify login stays on this phone. -->
+<full-backup-content>
+    <exclude domain="file" path="datastore/spotify.preferences_pb" />
+</full-backup-content>

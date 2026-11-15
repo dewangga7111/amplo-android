@@ -59,4 +59,6 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling:$compose")
 
     testImplementation("junit:junit:4.13.2")
+    // Android has org.json, but the unit tests run on the computer, without it.
+    testImplementation("org.json:json:20240303")
 }

@@ -30,6 +30,9 @@ object Amplo {
     val Warning = Color(0xFFFF9A5C)
     val FullBackground = Color(0xFF0E0F12)
     val PillLine = Color(0xFF2C3038)
+    /** The status of a Spotify song that is in the music folder, and of one that is not. */
+    val Available = Color(0xFF5EE08C)
+    val Missing = Color(0xFFFF6B6B)
 }
 
 val Inter = FontFamily(
