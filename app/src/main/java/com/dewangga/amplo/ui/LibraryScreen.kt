@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -39,6 +40,8 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -47,6 +50,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -90,6 +100,8 @@ fun LibraryScreen(model: AppViewModel) {
     }
     // The songs waiting for a playlist to go into, and for the name of a new one.
     var adding by remember { mutableStateOf<List<Track>?>(null) }
+    // The search button of Home opens All Songs with the search field open.
+    var searchOnOpen by remember { mutableStateOf(false) }
     var naming by remember { mutableStateOf<List<Track>?>(null) }
 
     // Nothing to show once the queue is empty.
@@ -118,7 +130,9 @@ fun LibraryScreen(model: AppViewModel) {
         Column(
             Modifier
                 .fillMaxSize()
-                .background(Amplo.Background),
+                .background(Amplo.Background)
+                // The keyboard of a search pushes the list and the mini player up.
+                .imePadding(),
         ) {
             Box(Modifier.weight(1f)) {
                 val all = lists
@@ -138,7 +152,16 @@ fun LibraryScreen(model: AppViewModel) {
                         label = "list",
                     ) { (_, list) ->
                         when (list) {
-                            null -> Home(model, all, onOpen = ::open, onNewPlaylist = { naming = emptyList() })
+                            null -> Home(
+                                model,
+                                all,
+                                onOpen = ::open,
+                                onNewPlaylist = { naming = emptyList() },
+                                onSearch = {
+                                    searchOnOpen = true
+                                    open(SongList.ALL)
+                                },
+                            )
                             is String -> SpotifyScreen(model, list, onBack = ::back, onOpen = ::open)
                             is SongList -> ListScreen(
                                 model,
@@ -147,6 +170,8 @@ fun LibraryScreen(model: AppViewModel) {
                                 onBack = ::back,
                                 onOpen = ::open,
                                 onAdd = { adding = it },
+                                searchOnOpen = searchOnOpen && list.key == SongList.ALL,
+                                onSearchOpened = { searchOnOpen = false },
                             )
                         }
                     }
@@ -253,7 +278,13 @@ private fun Message(title: String, detail: String?) {
 
 /** The lists to open, as the sidebar of the desktop app shows them. */
 @Composable
-private fun Home(model: AppViewModel, lists: List<SongList>, onOpen: (String) -> Unit, onNewPlaylist: () -> Unit) {
+private fun Home(
+    model: AppViewModel,
+    lists: List<SongList>,
+    onOpen: (String) -> Unit,
+    onNewPlaylist: () -> Unit,
+    onSearch: () -> Unit,
+) {
     val missing by model.missingEntries.collectAsStateWithLifecycle()
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 8.dp)) {
         item(key = "header") {
@@ -272,7 +303,8 @@ private fun Home(model: AppViewModel, lists: List<SongList>, onOpen: (String) ->
                     Icon(painterResource(R.drawable.ic_logo), null, Modifier.size(20.dp), tint = Amplo.OnAccent)
                 }
                 Spacer(Modifier.width(10.dp))
-                Text("amplo", style = MaterialTheme.typography.headlineMedium, color = Amplo.Text)
+                Text("amplo", Modifier.weight(1f), style = MaterialTheme.typography.headlineMedium, color = Amplo.Text)
+                RoundIconButton(R.drawable.ic_search, "Search songs", onClick = onSearch)
             }
         }
         item(key = "playlists") {
@@ -395,18 +427,54 @@ private fun ListScreen(
     onBack: () -> Unit,
     onOpen: (String) -> Unit,
     onAdd: (List<Track>) -> Unit,
+    searchOnOpen: Boolean,
+    onSearchOpened: () -> Unit,
 ) {
     val sort by model.sort.collectAsStateWithLifecycle()
     val liked by model.liked.collectAsStateWithLifecycle()
-    fun play(index: Int, shuffle: Boolean?) = model.player.play(list, index, shuffle)
+    var searching by rememberSaveable(list.key) { mutableStateOf(searchOnOpen) }
+    var query by rememberSaveable(list.key) { mutableStateOf("") }
+    // The field takes the focus when the search opens, not each time it scrolls back into view.
+    var focusSearch by remember(list.key) { mutableStateOf(searchOnOpen) }
+    LaunchedEffect(searchOnOpen) { if (searchOnOpen) onSearchOpened() }
+    // Back closes the search before it closes the list.
+    BackHandler(enabled = searching) {
+        searching = false
+        query = ""
+    }
+    // A search plays the songs it shows, in their order, as on the desktop.
+    val shown = remember(list, query) { list.copy(songs = list.songs.matching(query)) }
+    fun play(index: Int, shuffle: Boolean?) = model.player.play(shown, index, shuffle)
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 8.dp)) {
         item(key = "header") {
-            ListHeader(list, sort ?: Sort.RecentlyAdded, onBack, onOpen, ::play, model::setSort)
+            ListHeader(
+                list,
+                sort ?: Sort.RecentlyAdded,
+                onBack,
+                onOpen,
+                ::play,
+                model::setSort,
+                searching = searching,
+                onSearch = {
+                    searching = !searching
+                    focusSearch = searching
+                    if (!searching) query = ""
+                },
+            )
         }
-        if (list.songs.isEmpty()) {
+        if (searching) {
+            item(key = "search") {
+                SearchField(query, onChange = { query = it }, focus = focusSearch, onFocused = { focusSearch = false })
+            }
+        }
+        if (shown.songs.isEmpty()) {
             item(key = "empty") {
                 Text(
-                    "No songs yet. Add songs from their menu.",
+                    when {
+                        query.isNotBlank() && list.songs.isNotEmpty() -> "No songs match “${query.trim()}”."
+                        list.kind == ListKind.All -> "No music found. Copy songs into the Music folder of this phone."
+                        else -> "No songs yet. Add songs from their menu."
+                    },
                     Modifier.padding(horizontal = 20.dp, vertical = 24.dp),
                     style = MaterialTheme.typography.bodyMedium,
                     color = Amplo.Muted,
@@ -414,7 +482,7 @@ private fun ListScreen(
             }
         }
         // A playlist can have a song twice, so the place in the list tells rows apart.
-        itemsIndexed(list.songs, key = { index, track -> "$index:${track.id}" }) { index, track ->
+        itemsIndexed(shown.songs, key = { index, track -> "$index:${track.id}" }) { index, track ->
             SongRow(
                 track,
                 current = track.id == currentId,
@@ -439,6 +507,8 @@ private fun ListHeader(
     onOpen: (String) -> Unit,
     onPlay: (Int, Boolean?) -> Unit,
     onSort: (Sort) -> Unit,
+    searching: Boolean,
+    onSearch: () -> Unit,
 ) {
     Column(
         Modifier
@@ -483,6 +553,12 @@ private fun ListHeader(
                     PillButton("Play", R.drawable.ic_play, accent = true) { onPlay(0, false) }
                     PillButton("Shuffle", R.drawable.ic_shuffle, accent = false) { onPlay(0, true) }
                     Spacer(Modifier.weight(1f))
+                    RoundIconButton(
+                        R.drawable.ic_search,
+                        if (searching) "Close the search" else "Search in ${list.name}",
+                        tint = if (searching) Amplo.Accent else Amplo.Text,
+                        onClick = onSearch,
+                    )
                     // An album keeps the order of its discs and tracks.
                     if (list.kind != ListKind.Album) SortButton(sort, onSort)
                 }
@@ -577,6 +653,51 @@ private fun SongRow(
         )
         SongMenu(track.title, liked, removeFrom, links, onOpen, onLike, onAdd, onRemove)
     }
+}
+
+/** The songs whose title, artist or album has [query] in it, as the desktop search finds them. */
+private fun List<Track>.matching(query: String): List<Track> {
+    val words = query.trim().lowercase()
+    if (words.isEmpty()) return this
+    return filter { track -> listOf(track.title, track.artist, track.album).any { it.lowercase().contains(words) } }
+}
+
+/** The search field above the songs of a list. It takes the focus while [focus] is true. */
+@Composable
+private fun SearchField(query: String, onChange: (String) -> Unit, focus: Boolean, onFocused: () -> Unit) {
+    val requester = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    LaunchedEffect(focus) {
+        if (!focus) return@LaunchedEffect
+        // The field can take the focus only once it is laid out.
+        withFrameNanos {}
+        requester.requestFocus()
+        onFocused()
+    }
+    OutlinedTextField(
+        value = query,
+        onValueChange = onChange,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 20.dp, end = 20.dp, bottom = 8.dp)
+            .focusRequester(requester),
+        placeholder = { Text("Search songs, artists, albums", color = Amplo.Muted) },
+        leadingIcon = { Icon(painterResource(R.drawable.ic_search), null, Modifier.size(18.dp), tint = Amplo.Muted) },
+        trailingIcon = {
+            if (query.isNotEmpty()) {
+                RoundIconButton(R.drawable.ic_close, "Clear the search", iconSize = 16.dp, tint = Amplo.Soft) { onChange("") }
+            }
+        },
+        singleLine = true,
+        shape = RoundedCornerShape(50),
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+        keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = Amplo.Accent,
+            unfocusedBorderColor = Amplo.PillLine,
+            cursorColor = Amplo.Accent,
+        ),
+    )
 }
 
 /** A list a song links to, such as its album. */
