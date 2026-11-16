@@ -4,9 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
-import android.os.Build
 import android.util.LruCache
-import android.util.Size
 
 /** Loads the pictures embedded in songs, scaled to a size, and keeps the recent ones. */
 object Covers {
@@ -27,12 +25,10 @@ object Covers {
         val key = Key(id, size)
         cache.get(key)?.let { return it }
         if (missing.get(key) != null) return null
+        // Not loadThumbnail: for a song without a picture, Android gives the largest picture in
+        // its folder, such as the cover of a playlist. The desktop app shows no picture then.
         val bitmap = try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                context.contentResolver.loadThumbnail(songUri(id), Size(size, size), null)
-            } else {
-                embedded(context, id, size)
-            }
+            embedded(context, id, size)
         } catch (_: Exception) {
             null
         }

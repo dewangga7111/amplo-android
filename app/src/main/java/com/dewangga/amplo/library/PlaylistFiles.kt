@@ -15,7 +15,7 @@ import java.io.File
 import java.io.IOException
 
 /** A playlist file on the device. [tracks] are the songs found, in the order of the file. */
-data class Playlist(val id: Long, val name: String, val path: String, val tracks: List<Long>) {
+data class Playlist(val id: Long, val name: String, val path: String, val tracks: List<Long>, val cover: CoverRef? = null) {
     val folder: String get() = path.substringBeforeLast('/')
 }
 
@@ -42,6 +42,7 @@ object PlaylistFiles {
      */
     fun scan(context: Context, tracks: List<Track>): Pair<List<Playlist>, Int> {
         val index = TrackIndex(tracks)
+        val covers = PlaylistCovers.Finder(context)
         val playlists = ArrayList<Playlist>()
         var missing = 0
         val selection = "${FileColumns.MEDIA_TYPE} = ${FileColumns.MEDIA_TYPE_PLAYLIST}" +
@@ -68,7 +69,7 @@ object PlaylistFiles {
                 val found = entries.mapNotNull { index.find(M3u.resolve(folder, it)) }
                 missing += entries.size - found.size
                 if (entries.isEmpty() || found.isNotEmpty()) {
-                    playlists += Playlist(id, M3u.displayName(fileName), path, found)
+                    playlists += Playlist(id, M3u.displayName(fileName), path, found, covers.find(path))
                 }
             }
         }

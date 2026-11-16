@@ -1,10 +1,12 @@
 package com.dewangga.amplo.ui
 
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -256,6 +258,18 @@ private fun Messages(model: AppViewModel) {
     LaunchedEffect(consent) {
         consent?.let { ask.launch(IntentSenderRequest.Builder(it.request).build()) }
     }
+    val folder by model.folderRequest.collectAsStateWithLifecycle()
+    val pickFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree(), model::answerFolder)
+    LaunchedEffect(folder) {
+        folder?.let { request ->
+            try {
+                pickFolder.launch(request.start)
+            } catch (_: ActivityNotFoundException) {
+                model.answerFolder(null)
+                Toast.makeText(context, "This phone has no folder picker.", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
 }
 
 @Composable
@@ -286,6 +300,7 @@ private fun Home(
     onSearch: () -> Unit,
 ) {
     val missing by model.missingEntries.collectAsStateWithLifecycle()
+    val coverHint by model.coverHint.collectAsStateWithLifecycle()
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 8.dp)) {
         item(key = "header") {
             Row(
@@ -318,6 +333,9 @@ private fun Home(
         }
         items(lists, key = { it.key }) { list ->
             ListRow(list) { onOpen(list.key) }
+        }
+        if (coverHint) {
+            item(key = "cover-hint") { CoverHint(onAllow = model::allowCovers, onClose = model::closeCoverHint) }
         }
         if (missing > 0) {
             item(key = "missing") {
@@ -361,6 +379,31 @@ private fun Home(
     }
 }
 
+/** Offers to read the Music folder, where the covers that playlists got on a computer are. */
+@Composable
+private fun CoverHint(onAllow: () -> Unit, onClose: () -> Unit) {
+    Row(
+        Modifier
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .fillMaxWidth()
+            .background(Amplo.Mini, RoundedCornerShape(12.dp))
+            .padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("Show playlist covers", style = MaterialTheme.typography.titleSmall, color = Amplo.Text)
+            Spacer(Modifier.height(2.dp))
+            Text(
+                "Covers made on a computer are pictures beside the playlists. Pick the Music folder to show them.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Spacer(Modifier.height(10.dp))
+            PillButton("Pick the Music folder", R.drawable.ic_folder, accent = false, onClick = onAllow)
+        }
+        RoundIconButton(R.drawable.ic_close, "Close", iconSize = 16.dp, tint = Amplo.Soft, onClick = onClose)
+    }
+}
+
 @Composable
 private fun ListRow(list: SongList, onClick: () -> Unit) {
     Row(
@@ -395,6 +438,10 @@ private fun ListArt(list: SongList, size: Dp, corner: Dp) {
         ) {
             Icon(painterResource(R.drawable.ic_heart_filled), null, Modifier.size(size * 0.45f), tint = Amplo.OnAccent)
         }
+        return
+    }
+    list.playlist?.cover?.let {
+        PlaylistCoverImage(it, size, corner)
         return
     }
     val covers = remember(list) {
@@ -445,6 +492,10 @@ private fun ListScreen(
     // A search plays the songs it shows, in their order, as on the desktop.
     val shown = remember(list, query) { list.copy(songs = list.songs.matching(query)) }
     fun play(index: Int, shuffle: Boolean?) = model.player.play(shown, index, shuffle)
+    val pickCover = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { image ->
+        val playlist = list.playlist
+        if (image != null && playlist != null) model.setCover(playlist, image)
+    }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 8.dp)) {
         item(key = "header") {
             ListHeader(
@@ -455,6 +506,8 @@ private fun ListScreen(
                 ::play,
                 model::setSort,
                 searching = searching,
+                onChangeCover = { pickCover.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                onRemoveCover = { list.playlist?.let(model::removeCover) },
                 onSearch = {
                     searching = !searching
                     focusSearch = searching
@@ -508,6 +561,8 @@ private fun ListHeader(
     onPlay: (Int, Boolean?) -> Unit,
     onSort: (Sort) -> Unit,
     searching: Boolean,
+    onChangeCover: () -> Unit,
+    onRemoveCover: () -> Unit,
     onSearch: () -> Unit,
 ) {
     Column(
@@ -515,7 +570,11 @@ private fun ListHeader(
             .statusBarsPadding()
             .padding(start = 8.dp, end = 12.dp, top = 8.dp, bottom = 12.dp),
     ) {
-        RoundIconButton(R.drawable.ic_back, "Back", onClick = onBack)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            RoundIconButton(R.drawable.ic_back, "Back", onClick = onBack)
+            Spacer(Modifier.weight(1f))
+            list.playlist?.let { PlaylistMenu(it.name, hasCover = it.cover != null, onChangeCover, onRemoveCover) }
+        }
         Column(Modifier.padding(start = 12.dp, top = 8.dp)) {
             Row(verticalAlignment = Alignment.Bottom) {
                 ListArt(list, 112.dp, corner = 10.dp)
@@ -561,6 +620,32 @@ private fun ListHeader(
                     )
                     // An album keeps the order of its discs and tracks.
                     if (list.kind != ListKind.Album) SortButton(sort, onSort)
+                }
+            }
+        }
+    }
+}
+
+/** Change cover and Remove cover for a playlist file. */
+@Composable
+private fun PlaylistMenu(name: String, hasCover: Boolean, onChangeCover: () -> Unit, onRemoveCover: () -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        RoundIconButton(R.drawable.ic_more, "More for $name") { open = true }
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+            shape = RoundedCornerShape(12.dp),
+            containerColor = Amplo.Mini,
+        ) {
+            MenuItem("Change cover", R.drawable.ic_edit) {
+                open = false
+                onChangeCover()
+            }
+            if (hasCover) {
+                MenuItem("Remove cover", R.drawable.ic_close) {
+                    open = false
+                    onRemoveCover()
                 }
             }
         }

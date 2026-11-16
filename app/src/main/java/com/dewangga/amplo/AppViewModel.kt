@@ -8,6 +8,9 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.provider.MediaStore
+import android.net.Uri
+import android.os.Build
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
@@ -21,6 +24,8 @@ import com.dewangga.amplo.library.LyricsFiles
 import com.dewangga.amplo.library.M3u
 import com.dewangga.amplo.library.MediaStoreScanner
 import com.dewangga.amplo.library.NeedsConsent
+import com.dewangga.amplo.library.NeedsFolderAccess
+import com.dewangga.amplo.library.PlaylistCovers
 import com.dewangga.amplo.library.Playlist
 import com.dewangga.amplo.library.PlaylistFiles
 import com.dewangga.amplo.library.Sort
@@ -56,10 +61,20 @@ private val Context.settings by preferencesDataStore("settings")
 private val SORT = stringPreferencesKey("sort")
 private val LIKED = stringSetPreferencesKey("liked")
 private val LYRICS_EXTRA = stringPreferencesKey("lyrics_extra")
+private val COVER_HINT_CLOSED = booleanPreferencesKey("cover_hint_closed")
 private const val TAG = "amplo"
 
-/** The songs and playlists of the device, as read together. */
-private data class Library(val tracks: List<Track>, val playlists: List<Playlist>, val missing: Int)
+/**
+ * The songs and playlists of the device, as read together. [hiddenCovers] is true when some
+ * playlist is in a folder whose pictures amplo may not read.
+ */
+private data class Library(val tracks: List<Track>, val playlists: List<Playlist>, val missing: Int, val hiddenCovers: Boolean)
+
+/**
+ * Something that waits for the user to pick a folder amplo may change. [start] is where the
+ * folder picker opens.
+ */
+class FolderRequest(val start: Uri?, internal val picked: () -> Unit, internal val canceled: () -> Unit)
 
 /** A change to a playlist or lyrics file that waits for the user to allow it. */
 class Consent(val request: IntentSender, internal val retry: () -> Unit, internal val denied: () -> Unit)
@@ -108,6 +123,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val notices = MutableSharedFlow<String>(extraBufferCapacity = 4)
     /** Short confirmations, such as "Added 1 song to Mix." */
     val messages: SharedFlow<String> = notices
+
+    private val folderFlow = MutableStateFlow<FolderRequest?>(null)
+    /** A cover change that waits for the user to pick the folder of its playlist. */
+    val folderRequest: StateFlow<FolderRequest?> = folderFlow.asStateFlow()
+
+    /**
+     * Whether Home offers to show the covers that playlists got on a computer. Newer Android
+     * shows them only from a folder the user picked.
+     */
+    val coverHint: StateFlow<Boolean> = combine(library, application.settings.data) { library, settings ->
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && library?.hiddenCovers == true && settings[COVER_HINT_CLOSED] != true
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     private val consentFlow = MutableStateFlow<Consent?>(null)
     /** A change that waits for the user to allow amplo to change a playlist file. */
@@ -173,7 +200,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun read(): Library = withContext(Dispatchers.IO) {
         val tracks = MediaStoreScanner.scan(context)
         val (playlists, missing) = PlaylistFiles.scan(context, tracks)
-        Library(tracks, playlists, missing)
+        Library(tracks, playlists, missing, PlaylistCovers.anyHidden(context, playlists.map(Playlist::path)))
     }
 
     /** The song with this MediaStore id, if the library has it. */
@@ -268,6 +295,71 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             withTimeoutOrNull(2000) { lists.first { all -> all?.any { it.key == key } == true } }
             done(key)
         }
+    }
+
+    /** Makes the picture at [image] the cover of [playlist]. */
+    fun setCover(playlist: Playlist, image: Uri) = changeCover(playlist, "Changed the cover of ${playlist.name}.", asked = false) {
+        PlaylistCovers.write(context, playlist.path, PlaylistCovers.makeCover(context, image))
+    }
+
+    /** Deletes the cover of [playlist], so it shows the covers of its songs again. */
+    fun removeCover(playlist: Playlist) = changeCover(playlist, "Removed the cover of ${playlist.name}.", asked = false) {
+        PlaylistCovers.remove(context, playlist.path)
+    }
+
+    private fun changeCover(playlist: Playlist, message: String, asked: Boolean, change: () -> Unit) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { change() }
+            } catch (_: NeedsFolderAccess) {
+                // The folder that was picked does not have the playlist.
+                if (asked) return@launch notify("Pick the folder that has ${playlist.name}, such as Music.")
+                folderFlow.value = FolderRequest(
+                    PlaylistCovers.folderUri(playlist.path),
+                    picked = { changeCover(playlist, message, asked = true, change) },
+                    canceled = { notify("The cover was not changed.") },
+                )
+                return@launch
+            } catch (error: IllegalArgumentException) {
+                return@launch notify(error.message.orEmpty())
+            } catch (error: Exception) {
+                Log.w(TAG, "Could not change the cover of ${playlist.path}", error)
+                return@launch notify("Could not change the cover: ${error.message}")
+            }
+            scan?.cancel()
+            library.value = read()
+            notify(message)
+        }
+    }
+
+    /** Asks for the Music folder, so the covers made on a computer show. */
+    fun allowCovers() {
+        folderFlow.value = FolderRequest(
+            PlaylistCovers.musicUri(),
+            picked = {
+                scan?.cancel()
+                scan = viewModelScope.launch { library.value = read() }
+            },
+            canceled = {},
+        )
+    }
+
+    fun closeCoverHint() {
+        viewModelScope.launch { context.settings.edit { it[COVER_HINT_CLOSED] = true } }
+    }
+
+    /** Takes the folder the user picked, or null when they canceled. */
+    fun answerFolder(tree: Uri?) {
+        val waiting = folderFlow.value ?: return
+        folderFlow.value = null
+        if (tree == null) return waiting.canceled()
+        try {
+            PlaylistCovers.keep(context, tree)
+        } catch (error: SecurityException) {
+            Log.w(TAG, "Could not keep the access to $tree", error)
+            return notify("Android did not let amplo keep the access to this folder.")
+        }
+        waiting.picked()
     }
 
     /** Answers the question Android asked the user about changing a file. */
