@@ -15,6 +15,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Android 10 and later let amplo open its lock screen player from the background only with this. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <application
         android:allowBackup="true"
@@ -44,6 +46,16 @@
                 <data android:scheme="amplo" android:host="spotify" />
             </intent-filter>
         </activity>
+
+        <!-- The player on the lock screen. It has its own task, so closing it shows what was there before. -->
+        <activity
+            android:name=".lock.LockActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleInstance"
+            android:screenOrientation="portrait"
+            android:showWhenLocked="true"
+            android:taskAffinity="com.dewangga.amplo.lock" />
 
         <service
             android:name=".playback.PlaybackService"

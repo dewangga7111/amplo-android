@@ -206,7 +206,7 @@ private fun Modifier.edgeFades(): Modifier = this
     }
 
 @Composable
-private fun SyncedLines(lyrics: Lyrics, extra: Extra?, position: MutableLongState, onSeek: (LyricLine) -> Unit) {
+internal fun SyncedLines(lyrics: Lyrics, extra: Extra?, position: MutableLongState, onSeek: (LyricLine) -> Unit) {
     val active by remember(lyrics) { derivedStateOf { lyrics.activeLine(position.longValue) } }
     val list = rememberLazyListState()
     // When the user last touched the lines.
@@ -282,7 +282,7 @@ private suspend fun LazyListState.center(index: Int, animate: Boolean) {
 }
 
 @Composable
-private fun PlainLines(lyrics: Lyrics, extra: Extra?) {
+internal fun PlainLines(lyrics: Lyrics, extra: Extra?) {
     LazyColumn(
         Modifier.fillMaxSize().edgeFades(),
         contentPadding = PaddingValues(vertical = 24.dp),

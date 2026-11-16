@@ -17,7 +17,8 @@ fun songUri(id: Long): Uri = ContentUris.withAppendedId(Media.EXTERNAL_CONTENT_U
  */
 @Suppress("DEPRECATION")
 object MediaStoreScanner {
-    fun scan(context: Context): List<Track> {
+    /** The music of the device, or only the song with the MediaStore id [only]. */
+    fun scan(context: Context, only: Long? = null): List<Track> {
         val newer = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
         val columns = buildList {
             add(Media._ID)
@@ -42,8 +43,8 @@ object MediaStoreScanner {
         context.contentResolver.query(
             Media.EXTERNAL_CONTENT_URI,
             columns.toTypedArray(),
-            "${Media.IS_MUSIC} != 0",
-            null,
+            if (only == null) "${Media.IS_MUSIC} != 0" else "${Media._ID} = ?",
+            only?.let { arrayOf(it.toString()) },
             null,
         )?.use { cursor ->
             fun column(name: String) = cursor.getColumnIndexOrThrow(name)

@@ -1,8 +1,14 @@
 package com.dewangga.amplo.playback
 
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.os.Build
+import android.provider.Settings
+import android.util.Log
+import androidx.core.content.ContextCompat
 import android.graphics.Bitmap
 import android.net.Uri
 import android.provider.MediaStore
@@ -21,7 +27,10 @@ import androidx.media3.exoplayer.audio.TeeAudioProcessor
 import androidx.media3.session.CacheBitmapLoader
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import com.dewangga.amplo.LOCK_PLAYER
 import com.dewangga.amplo.MainActivity
+import com.dewangga.amplo.lock.LockActivity
+import com.dewangga.amplo.settings
 import com.dewangga.amplo.library.Covers
 import com.dewangga.amplo.library.songUri
 import com.google.common.util.concurrent.Futures
@@ -30,10 +39,31 @@ import com.google.common.util.concurrent.ListeningExecutorService
 import com.google.common.util.concurrent.MoreExecutors
 import java.io.IOException
 import java.util.concurrent.Executors
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 /** Plays the queue in the background and shows it in the notification and on the lock screen. */
 class PlaybackService : MediaSessionService() {
     private var session: MediaSession? = null
+    private val scope = MainScope()
+    /** Whether the user turned on the player on the lock screen. */
+    @Volatile private var lockPlayer = false
+
+    /** Shows the player on the lock screen when the screen goes off while music plays. */
+    private val screenOff = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val player = session?.player ?: return
+            if (!lockPlayer || !player.playWhenReady || player.mediaItemCount == 0) return
+            // Android 10 and later let an app open a screen from the background only with this.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !Settings.canDrawOverlays(context)) return
+            try {
+                startActivity(Intent(context, LockActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            } catch (error: RuntimeException) {
+                Log.w("amplo", "Could not show the player on the lock screen", error)
+            }
+        }
+    }
 
     @OptIn(UnstableApi::class)
     override fun onCreate() {
@@ -70,6 +100,8 @@ class PlaybackService : MediaSessionService() {
             .setBitmapLoader(CacheBitmapLoader(CoverBitmapLoader(this)))
             .setSessionActivity(open)
             .build()
+        scope.launch { settings.data.collect { lockPlayer = it[LOCK_PLAYER] == true } }
+        ContextCompat.registerReceiver(this, screenOff, IntentFilter(Intent.ACTION_SCREEN_OFF), ContextCompat.RECEIVER_NOT_EXPORTED)
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
@@ -84,6 +116,8 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        unregisterReceiver(screenOff)
+        scope.cancel()
         session?.run {
             player.release()
             release()

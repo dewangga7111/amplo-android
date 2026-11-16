@@ -57,10 +57,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
-private val Context.settings by preferencesDataStore("settings")
+internal val Context.settings by preferencesDataStore("settings")
 private val SORT = stringPreferencesKey("sort")
 private val LIKED = stringSetPreferencesKey("liked")
-private val LYRICS_EXTRA = stringPreferencesKey("lyrics_extra")
+/** Whether amplo shows its own player on the lock screen while music plays. */
+internal val LOCK_PLAYER = booleanPreferencesKey("lock_player")
+internal val LYRICS_EXTRA = stringPreferencesKey("lyrics_extra")
 private val COVER_HINT_CLOSED = booleanPreferencesKey("cover_hint_closed")
 private const val TAG = "amplo"
 
@@ -211,12 +213,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun toggleLike(track: Track) {
-        viewModelScope.launch {
-            context.settings.edit {
-                val liked = it[LIKED].orEmpty()
-                it[LIKED] = if (track.likeKey in liked) liked - track.likeKey else liked + track.likeKey
-            }
-        }
+        viewModelScope.launch { context.toggleLike(track) }
+    }
+
+    /** Whether amplo shows its own player on the lock screen. */
+    val lockPlayer: StateFlow<Boolean> = application.settings.data
+        .map { it[LOCK_PLAYER] == true }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    fun setLockPlayer(on: Boolean) {
+        viewModelScope.launch { context.settings.edit { it[LOCK_PLAYER] = on } }
     }
 
     /** Adds songs to a playlist. Songs it has already are left out. */
@@ -458,6 +464,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     override fun onCleared() {
         if (watching) context.contentResolver.unregisterContentObserver(observer)
         player.release()
+    }
+}
+
+/** The songs with a heart, by [likeKey]. */
+internal fun Context.likedSongs() = settings.data.map { it[LIKED].orEmpty() }
+
+/** Gives [track] a heart, or takes it away. */
+internal suspend fun Context.toggleLike(track: Track) {
+    settings.edit {
+        val liked = it[LIKED].orEmpty()
+        it[LIKED] = if (track.likeKey in liked) liked - track.likeKey else liked + track.likeKey
     }
 }
 

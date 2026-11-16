@@ -68,8 +68,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dewangga.amplo.AppViewModel
+import com.dewangga.amplo.lock.LockAccess
 import com.dewangga.amplo.R
 import com.dewangga.amplo.library.Collection
 import com.dewangga.amplo.library.ListKind
@@ -320,6 +322,7 @@ private fun Home(
                 Spacer(Modifier.width(10.dp))
                 Text("amplo", Modifier.weight(1f), style = MaterialTheme.typography.headlineMedium, color = Amplo.Text)
                 RoundIconButton(R.drawable.ic_search, "Search songs", onClick = onSearch)
+                HomeMenu(model)
             }
         }
         item(key = "playlists") {
@@ -838,6 +841,58 @@ private fun SongMenu(
                     onRemove()
                 }
             }
+        }
+    }
+}
+
+/** The settings of the app. */
+@Composable
+private fun HomeMenu(model: AppViewModel) {
+    val context = LocalContext.current
+    var open by remember { mutableStateOf(false) }
+    val lockPlayer by model.lockPlayer.collectAsStateWithLifecycle()
+    // The user can give or take the permission in the system settings while amplo is away.
+    var mayShow by remember { mutableStateOf(LockAccess.granted(context)) }
+    LifecycleResumeEffect(Unit) {
+        mayShow = LockAccess.granted(context)
+        onPauseOrDispose {}
+    }
+    Box {
+        RoundIconButton(R.drawable.ic_more, "Settings") { open = true }
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+            shape = RoundedCornerShape(12.dp),
+            containerColor = Amplo.Mini,
+        ) {
+            val on = lockPlayer && mayShow
+            DropdownMenuItem(
+                text = {
+                    Column {
+                        Text("Player on the lock screen", style = MaterialTheme.typography.bodyMedium, color = Amplo.Text)
+                        if (lockPlayer && !mayShow) {
+                            Text("Allow “Display over other apps”", style = MaterialTheme.typography.bodySmall, color = Amplo.Warning)
+                        }
+                    }
+                },
+                trailingIcon = {
+                    Icon(
+                        painterResource(if (on) R.drawable.ic_check else R.drawable.ic_close),
+                        if (on) "On" else "Off",
+                        Modifier.size(18.dp),
+                        tint = if (on) Amplo.Accent else Amplo.Muted,
+                    )
+                },
+                onClick = {
+                    open = false
+                    if (lockPlayer && mayShow) {
+                        model.setLockPlayer(false)
+                    } else {
+                        model.setLockPlayer(true)
+                        if (!mayShow) LockAccess.ask(context)
+                    }
+                },
+            )
         }
     }
 }

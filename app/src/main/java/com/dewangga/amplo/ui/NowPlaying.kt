@@ -85,7 +85,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-private const val VISUALIZER_BARS = 28
+internal const val VISUALIZER_BARS = 28
 
 /** What shows in the big square of Now Playing. */
 enum class Panel { Cover, Lyrics, Queue }
@@ -205,7 +205,7 @@ fun NowPlaying(
 }
 
 @Composable
-private fun monoStyle(size: Int, weight: FontWeight = FontWeight.Medium) =
+internal fun monoStyle(size: Int, weight: FontWeight = FontWeight.Medium) =
     MaterialTheme.typography.labelSmall.copy(fontFamily = JetBrainsMono, fontWeight = weight, fontSize = size.sp)
 
 @Composable
@@ -320,7 +320,7 @@ private fun detailLinks(track: Track, onOpen: (String) -> Unit): AnnotatedString
 }
 
 @Composable
-private fun ElapsedTime(position: MutableLongState) {
+internal fun ElapsedTime(position: MutableLongState) {
     val seconds by remember { derivedStateOf { position.longValue / 1000 } }
     Text(
         formatDuration(seconds * 1000),
@@ -346,7 +346,7 @@ fun techLines(bitrate: Int, shape: AudioShape?): List<String> = buildList {
 }
 
 @Composable
-private fun Visualizer(analyzer: Analyzer, frame: MutableLongState) {
+internal fun Visualizer(analyzer: Analyzer, frame: MutableLongState) {
     val color = Amplo.Accent.copy(alpha = 0.85f)
     Canvas(
         Modifier
@@ -373,7 +373,7 @@ private fun Visualizer(analyzer: Analyzer, frame: MutableLongState) {
 
 /** A thin bar to see and change where the song is. Tap or drag to seek. */
 @Composable
-private fun SeekBar(position: MutableLongState, durationMs: Long, onSeek: (Long) -> Unit, modifier: Modifier = Modifier) {
+internal fun SeekBar(position: MutableLongState, durationMs: Long, onSeek: (Long) -> Unit, modifier: Modifier = Modifier) {
     var dragged by remember { mutableStateOf<Float?>(null) }
     var width by remember { mutableFloatStateOf(1f) }
     fun at(x: Float) = (x / width).coerceIn(0f, 1f)
@@ -411,7 +411,7 @@ private fun SeekBar(position: MutableLongState, durationMs: Long, onSeek: (Long)
 }
 
 @Composable
-private fun Transport(state: PlayerState, player: PlayerConnection) {
+internal fun Transport(state: PlayerState, player: PlayerConnection) {
     Row(
         Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
