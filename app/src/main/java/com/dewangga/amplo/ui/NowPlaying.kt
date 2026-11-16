@@ -109,7 +109,7 @@ fun NowPlaying(
     val context = LocalContext.current
     fun edit(track: Track) {
         scope.launch {
-            val text = withContext(Dispatchers.IO) { LyricsFiles.readText(context, track) }.orEmpty().replace("\r\n", "\n")
+            val text = withContext(Dispatchers.IO) { LyricsFiles.editableText(context, track) }.orEmpty().replace("\r\n", "\n")
             editing = track to text
         }
     }

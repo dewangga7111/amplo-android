@@ -49,7 +49,16 @@ object LyricsFiles {
         return String(bytes, Charsets.UTF_8).removePrefix("﻿")
     }
 
-    fun read(context: Context, track: Track): Lyrics? = readText(context, track)?.let(Lyrics::parse)
+    /**
+     * The lyrics of [track]: its lyrics file, or else the lyrics in its tags. The file comes
+     * first, as amplo saves the lyrics the user writes there.
+     */
+    fun read(context: Context, track: Track): Lyrics? =
+        readText(context, track)?.let(Lyrics::parse) ?: EmbeddedLyrics.read(context, track.id)?.let(Lyrics::parse)
+
+    /** The text to edit for the lyrics of [track]: its lyrics file, or else the lyrics in its tags. */
+    fun editableText(context: Context, track: Track): String? =
+        readText(context, track) ?: EmbeddedLyrics.read(context, track.id)
 
     /**
      * Saves [text] as the lyrics of [track], with Windows line ends as the desktop app writes them.
