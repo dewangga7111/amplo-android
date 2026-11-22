@@ -24,6 +24,7 @@ import com.dewangga.amplo.library.LyricsFiles
 import com.dewangga.amplo.library.M3u
 import com.dewangga.amplo.library.MediaStoreScanner
 import com.dewangga.amplo.library.NeedsConsent
+import com.dewangga.amplo.sync.SyncModel
 import com.dewangga.amplo.library.NeedsFolderAccess
 import com.dewangga.amplo.library.PlaylistCovers
 import com.dewangga.amplo.library.Playlist
@@ -63,6 +64,9 @@ private val LIKED = stringSetPreferencesKey("liked")
 /** Whether amplo shows its own player on the lock screen while music plays. */
 internal val LOCK_PLAYER = booleanPreferencesKey("lock_player")
 internal val LYRICS_EXTRA = stringPreferencesKey("lyrics_extra")
+/** Shuffle and repeat stay as the user left them. The player service saves them. */
+internal val SHUFFLE = booleanPreferencesKey("shuffle")
+internal val REPEAT_ONE = booleanPreferencesKey("repeat_one")
 private val COVER_HINT_CLOSED = booleanPreferencesKey("cover_hint_closed")
 private const val TAG = "amplo"
 
@@ -146,6 +150,19 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     /** The Spotify login and the playlists read with it. */
     val spotify = SpotifyModel(application, viewModelScope)
+
+    /** Sync of songs and playlists with amplo on a computer. */
+    val sync = SyncModel(
+        application,
+        viewModelScope,
+        readLibrary = {
+            withContext(Dispatchers.IO) {
+                val tracks = MediaStoreScanner.scan(context)
+                tracks to PlaylistFiles.scan(context, tracks, keepHidden = true).first
+            }
+        },
+        askConsent = { request, retry, denied -> consentFlow.value = Consent(request, retry, denied) },
+    )
 
     private val lyricsFlow = MutableStateFlow<SongLyrics?>(null)
     /** The lyrics of the song that plays. Null until they are read, and while no song plays. */
@@ -463,6 +480,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         if (watching) context.contentResolver.unregisterContentObserver(observer)
+        sync.close()
         player.release()
     }
 }

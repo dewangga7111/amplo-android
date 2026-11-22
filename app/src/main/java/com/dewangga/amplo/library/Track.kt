@@ -20,6 +20,8 @@ data class Track(
     val bitrate: Int = 0,
     /** The full path of the file, such as "/storage/emulated/0/Music/song.flac". Playlists point to songs by it. */
     val path: String = "",
+    /** The size of the file in bytes, or 0 when unknown. */
+    val size: Long = 0,
 )
 
 /** The order of every song list except albums and the queue. */

@@ -41,7 +41,8 @@ data class PlayerState(
 /** A song of the queue. [index] is its place in the queue as it was given, which shuffle does not change. */
 data class QueueEntry(val index: Int, val trackId: Long, val title: String, val artist: String)
 
-private const val SOURCE_KEY = "amplo.source"
+/** Where the playlist metadata of the queue keeps the key of the list it came from. */
+internal const val SOURCE_KEY = "amplo.source"
 
 /** Controls [PlaybackService] from the screens. Calls made before it connects run once it does. */
 class PlayerConnection(context: Context) {
@@ -196,20 +197,22 @@ class PlayerConnection(context: Context) {
         upcoming.value = entries
     }
 
-    private fun mediaItem(track: Track): MediaItem = MediaItem.Builder()
-        .setMediaId(track.id.toString())
-        .setUri(songUri(track.id))
-        .setMediaMetadata(
-            MediaMetadata.Builder()
-                .setTitle(track.title)
-                .setArtist(track.artist.ifEmpty { null })
-                .setAlbumTitle(track.album.ifEmpty { null })
-                .setAlbumArtist(track.albumArtist.ifEmpty { null })
-                .setGenre(track.genre.ifEmpty { null })
-                .setArtworkUri(songUri(track.id))
-                .setIsPlayable(true)
-                .setIsBrowsable(false)
-                .build(),
-        )
-        .build()
 }
+
+/** A song for the queue, with what the notification and the lock screen show. */
+internal fun mediaItem(track: Track): MediaItem = MediaItem.Builder()
+    .setMediaId(track.id.toString())
+    .setUri(songUri(track.id))
+    .setMediaMetadata(
+        MediaMetadata.Builder()
+            .setTitle(track.title)
+            .setArtist(track.artist.ifEmpty { null })
+            .setAlbumTitle(track.album.ifEmpty { null })
+            .setAlbumArtist(track.albumArtist.ifEmpty { null })
+            .setGenre(track.genre.ifEmpty { null })
+            .setArtworkUri(songUri(track.id))
+            .setIsPlayable(true)
+            .setIsBrowsable(false)
+            .build(),
+    )
+    .build()

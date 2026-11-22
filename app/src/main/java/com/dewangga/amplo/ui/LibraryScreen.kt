@@ -260,6 +260,8 @@ private fun Messages(model: AppViewModel) {
     LaunchedEffect(consent) {
         consent?.let { ask.launch(IntentSenderRequest.Builder(it.request).build()) }
     }
+    val syncState by model.sync.state.collectAsStateWithLifecycle()
+    SyncDialog(model.sync, syncState)
     val folder by model.folderRequest.collectAsStateWithLifecycle()
     val pickFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree(), model::answerFolder)
     LaunchedEffect(folder) {
@@ -891,6 +893,14 @@ private fun HomeMenu(model: AppViewModel) {
                         model.setLockPlayer(true)
                         if (!mayShow) LockAccess.ask(context)
                     }
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("Sync with computer", style = MaterialTheme.typography.bodyMedium, color = Amplo.Text) },
+                trailingIcon = { Icon(painterResource(R.drawable.ic_phone), null, Modifier.size(18.dp), tint = Amplo.Soft) },
+                onClick = {
+                    open = false
+                    model.sync.start()
                 },
             )
         }

@@ -38,9 +38,10 @@ object PlaylistFiles {
 
     /**
      * Reads every playlist, sorted by name. A new playlist has no songs yet. One whose songs are
-     * all missing stays hidden. Also returns how many entries point to songs that are not found.
+     * all missing stays hidden, unless [keepHidden] is true. Also returns how many entries point
+     * to songs that are not found.
      */
-    fun scan(context: Context, tracks: List<Track>): Pair<List<Playlist>, Int> {
+    fun scan(context: Context, tracks: List<Track>, keepHidden: Boolean = false): Pair<List<Playlist>, Int> {
         val index = TrackIndex(tracks)
         val covers = PlaylistCovers.Finder(context)
         val playlists = ArrayList<Playlist>()
@@ -68,7 +69,7 @@ object PlaylistFiles {
                 val entries = M3u.entries(text)
                 val found = entries.mapNotNull { index.find(M3u.resolve(folder, it)) }
                 missing += entries.size - found.size
-                if (entries.isEmpty() || found.isNotEmpty()) {
+                if (keepHidden || entries.isEmpty() || found.isNotEmpty()) {
                     playlists += Playlist(id, M3u.displayName(fileName), path, found, covers.find(path))
                 }
             }
@@ -108,12 +109,15 @@ object PlaylistFiles {
      * Writes a new playlist named [name] into Music/Playlists with [tracks] in it. Returns its
      * path, or throws [IllegalArgumentException] with a message for the user.
      */
-    fun create(context: Context, name: String, tracks: List<Track>): String {
+    fun create(context: Context, name: String, tracks: List<Track>): String = createFromPaths(context, name, tracks.map(Track::path))
+
+    /** Like [create], with the full paths of the songs. */
+    fun createFromPaths(context: Context, name: String, paths: List<String>): String {
         val fileName = M3u.fileNameFor(name) ?: throw IllegalArgumentException("Type a name for the playlist.")
         val folder = newFolder
         val file = File(folder, "$fileName.m3u")
         if (exists(context, file)) throw IllegalArgumentException("A playlist named “$fileName” already exists.")
-        val text = M3u.create(folder.path, tracks.map(Track::path))
+        val text = M3u.create(folder.path, paths)
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             folder.mkdirs()
             file.writeText(text)
@@ -154,6 +158,13 @@ object PlaylistFiles {
             return create(context, candidate, tracks)
         }
         throw IllegalArgumentException("Too many playlists are named “$fileName”.")
+    }
+
+    /** One question to the user that allows changes to all of [playlists]. Android 11 and later. */
+    fun writeRequest(context: Context, playlists: List<Playlist>): IntentSender? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || playlists.isEmpty()) return null
+        val uris = playlists.map { ContentUris.withAppendedId(MediaStore.Audio.Playlists.EXTERNAL_CONTENT_URI, it.id) }
+        return MediaStore.createWriteRequest(context.contentResolver, uris).intentSender
     }
 
     /** MediaStore knows the files that amplo cannot see directly on newer Android. */

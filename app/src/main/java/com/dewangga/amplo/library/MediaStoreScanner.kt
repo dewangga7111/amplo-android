@@ -98,6 +98,7 @@ object MediaStoreScanner {
                         cursor.getLong(duration),
                     ),
                     path = cursor.getString(data).orEmpty(),
+                    size = cursor.getLong(size),
                 )
             }
         }
