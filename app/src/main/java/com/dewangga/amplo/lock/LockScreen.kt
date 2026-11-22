@@ -3,9 +3,6 @@ package com.dewangga.amplo.lock
 import android.os.SystemClock
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
@@ -62,6 +59,7 @@ import com.dewangga.amplo.playback.AudioTap
 import com.dewangga.amplo.playback.FFT_SIZE
 import com.dewangga.amplo.playback.PlayerConnection
 import com.dewangga.amplo.playback.PlayerState
+import com.dewangga.amplo.ui.panelTransition
 import com.dewangga.amplo.ui.Cover
 import com.dewangga.amplo.ui.ElapsedTime
 import com.dewangga.amplo.ui.PlainLines
@@ -152,7 +150,7 @@ fun LockScreen(model: LockModel, onClose: () -> Unit) {
     ) {
         Header(state, showLyrics) { showLyrics = !showLyrics }
         Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-            AnimatedContent(showLyrics, transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "panel") { lyricsShown ->
+            AnimatedContent(showLyrics, transitionSpec = { panelTransition() }, contentAlignment = Alignment.Center, label = "panel") { lyricsShown ->
                 if (lyricsShown) {
                     LockLyrics(model, state, position, player) { showLyrics = false }
                 } else {

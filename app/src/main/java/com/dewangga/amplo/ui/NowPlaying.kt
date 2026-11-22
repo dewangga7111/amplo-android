@@ -1,7 +1,16 @@
 package com.dewangga.amplo.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
@@ -162,12 +171,26 @@ fun NowPlaying(
             onPanel = { panel = if (panel == it) Panel.Cover else it },
             onOpen = onOpen,
         )
-        Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-            when (panel) {
+        AnimatedContent(
+            panel,
+            Modifier.weight(1f).fillMaxWidth(),
+            transitionSpec = { panelTransition() },
+            contentAlignment = Alignment.Center,
+            label = "panel",
+        ) { shown ->
+            when (shown) {
                 Panel.Queue -> QueueCard(state, player)
-                Panel.Lyrics -> LyricsCard(model, state, position, onEdit = ::edit)
+                Panel.Lyrics -> LyricsCard(model, state, position, onEdit = ::edit, onCover = { panel = Panel.Cover })
                 Panel.Cover -> BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Cover(state.trackId, minOf(maxWidth, maxHeight), corner = 14.dp)
+                    val side = minOf(maxWidth, maxHeight)
+                    // A tap on the cover shows the lyrics, as on the lock screen.
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable(onClickLabel = "Show the lyrics") { panel = Panel.Lyrics },
+                    ) {
+                        Cover(state.trackId, side, corner = 14.dp)
+                    }
                 }
             }
         }
@@ -515,3 +538,11 @@ private fun QueueRow(trackId: Long?, title: String, artist: String, titleColor: 
         }
     }
 }
+
+/**
+ * The change between the cover, the lyrics and the queue: the new panel grows a little into
+ * place while the old one fades.
+ */
+internal fun panelTransition(): ContentTransform =
+    (fadeIn(tween(260, delayMillis = 60)) + scaleIn(tween(320, easing = FastOutSlowInEasing), initialScale = 0.94f)) togetherWith
+        (fadeOut(tween(160)) + scaleOut(tween(200), targetScale = 0.97f))

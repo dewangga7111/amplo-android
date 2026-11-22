@@ -38,6 +38,8 @@ import androidx.compose.runtime.MutableLongState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -69,6 +71,7 @@ import com.dewangga.amplo.ui.theme.Amplo
 import com.dewangga.amplo.ui.theme.Inter
 import com.dewangga.amplo.ui.theme.SpaceGrotesk
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 
 /** After the user scrolls the lyrics, they stay where the user left them this long. */
 private const val FOLLOW_AGAIN_MS = 3000L
@@ -83,7 +86,13 @@ private val extraStyle = TextStyle(fontFamily = Inter, fontSize = 13.sp, lineHei
  * the line sung now in the middle, and a tap on a line plays from there.
  */
 @Composable
-fun LyricsCard(model: AppViewModel, state: PlayerState, position: MutableLongState, onEdit: (Track) -> Unit) {
+fun LyricsCard(
+    model: AppViewModel,
+    state: PlayerState,
+    position: MutableLongState,
+    onEdit: (Track) -> Unit,
+    onCover: () -> Unit,
+) {
     val song by model.lyrics.collectAsStateWithLifecycle()
     val chosenExtra by model.lyricsExtra.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -99,7 +108,17 @@ fun LyricsCard(model: AppViewModel, state: PlayerState, position: MutableLongSta
             .padding(start = 18.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
     ) {
         Row(Modifier.height(36.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("LYRICS", Modifier.weight(1f), style = MaterialTheme.typography.labelSmall, color = Amplo.Muted)
+            // A tap on the title shows the cover again.
+            Box(
+                Modifier
+                    .weight(1f)
+                    .height(36.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(onClickLabel = "Show the cover", onClick = onCover),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                Text("LYRICS", style = MaterialTheme.typography.labelSmall, color = Amplo.Muted)
+            }
             if (lyrics != null) {
                 if (lyrics.extraChoices.size > 1) {
                     HeaderLink(extra?.label ?: "Original", "Change what shows under each line", on = extra != null) {
@@ -208,7 +227,10 @@ private fun Modifier.edgeFades(): Modifier = this
 @Composable
 internal fun SyncedLines(lyrics: Lyrics, extra: Extra?, position: MutableLongState, onSeek: (LyricLine) -> Unit) {
     val active by remember(lyrics) { derivedStateOf { lyrics.activeLine(position.longValue) } }
-    val list = rememberLazyListState()
+    // The list opens at the line sung now, so it does not glide there from the top.
+    val list = rememberLazyListState(initialFirstVisibleItemIndex = lyrics.activeLine(position.longValue) ?: 0)
+    // False until the first line is in the middle. Until then the lines do not glide.
+    var placed by remember(lyrics) { mutableStateOf(false) }
     // When the user last touched the lines.
     var touched by remember { mutableLongStateOf(0L) }
     LaunchedEffect(list) {
@@ -219,7 +241,8 @@ internal fun SyncedLines(lyrics: Lyrics, extra: Extra?, position: MutableLongSta
         }
     }
     // The line sung now stays in the middle. Before the first line, the first line is there.
-    LaunchedEffect(lyrics, active, touched) {
+    LaunchedEffect(lyrics, active, touched, placed) {
+        if (!placed) return@LaunchedEffect
         val wait = touched + FOLLOW_AGAIN_MS - SystemClock.uptimeMillis()
         if (wait > 0) delay(wait)
         list.center(active ?: 0, animate = true)
@@ -265,7 +288,11 @@ internal fun SyncedLines(lyrics: Lyrics, extra: Extra?, position: MutableLongSta
         }
     }
     // The first frame starts at the right line, without a glide from the top.
-    LaunchedEffect(lyrics) { list.center(active ?: 0, animate = false) }
+    LaunchedEffect(lyrics) {
+        snapshotFlow { list.layoutInfo.visibleItemsInfo.isNotEmpty() }.first { it }
+        list.center(active ?: 0, animate = false)
+        placed = true
+    }
 }
 
 /** Scrolls so the middle of item [index] is in the middle of the list. */
